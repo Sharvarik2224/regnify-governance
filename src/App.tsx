@@ -14,6 +14,14 @@ import EmployeeDetail from "./pages/hr/EmployeeDetail";
 import HrApprovals from "./pages/hr/HrApprovals";
 import GovernanceAlerts from "./pages/hr/GovernanceAlerts";
 import AuditLogs from "./pages/hr/AuditLogs";
+import ManagerLayout from "./components/layout/ManagerLayout";
+import ManagerDashboard from "./pages/manager/ManagerDashboard";
+import ManagerTeam from "./pages/manager/ManagerTeam";
+import ManagerTasks from "./pages/manager/ManagerTasks";
+import ManagerTaskNew from "./pages/manager/ManagerTaskNew";
+import ManagerEmployeeDetail from "./pages/manager/ManagerEmployeeDetail";
+import ManagerApprovals from "./pages/manager/ManagerApprovals";
+import ManagerAlerts from "./pages/manager/ManagerAlerts";
 import PlaceholderDashboard from "./pages/PlaceholderDashboard";
 import NotFound from "./pages/NotFound";
 
@@ -40,8 +48,19 @@ const App = () => (
               <Route path="audit-logs" element={<AuditLogs />} />
             </Route>
 
+            {/* Manager Routes */}
+            <Route path="/manager" element={<ProtectedRoute allowedRole="manager"><ManagerLayout /></ProtectedRoute>}>
+              <Route index element={<ManagerDashboard />} />
+              <Route path="dashboard" element={<ManagerDashboard />} />
+              <Route path="team" element={<ManagerTeam />} />
+              <Route path="tasks" element={<ManagerTasks />} />
+              <Route path="tasks/new" element={<ManagerTaskNew />} />
+              <Route path="employees/:id" element={<ManagerEmployeeDetail />} />
+              <Route path="approvals" element={<ManagerApprovals />} />
+              <Route path="alerts" element={<ManagerAlerts />} />
+            </Route>
+
             {/* Other role placeholders */}
-            <Route path="/manager/dashboard" element={<ProtectedRoute allowedRole="manager"><PlaceholderDashboard role="Manager" /></ProtectedRoute>} />
             <Route path="/employee/dashboard" element={<ProtectedRoute allowedRole="employee"><PlaceholderDashboard role="Employee" /></ProtectedRoute>} />
             <Route path="/site-head/dashboard" element={<ProtectedRoute allowedRole="site-head"><PlaceholderDashboard role="Site Head" /></ProtectedRoute>} />
 
