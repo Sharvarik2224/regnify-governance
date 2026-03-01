@@ -1,4 +1,4 @@
-const admin = require("../config/firebaseAdmin");
+import admin from "../config/firebaseAdmin.js";
 
 const authenticate = async (req, res, next) => {
   try {
@@ -15,10 +15,11 @@ const authenticate = async (req, res, next) => {
     req.user = decoded;
 
     next();
+
   } catch (error) {
-    console.error("AUTH ERROR:", error);
-    return res.status(401).json({ message: "Unauthorized" });
+    console.error("Auth Middleware Error:", error);
+    res.status(401).json({ message: "Unauthorized" });
   }
 };
 
-module.exports = authenticate;
+export default authenticate;

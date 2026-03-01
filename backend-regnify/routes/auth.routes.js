@@ -1,7 +1,7 @@
-const express = require("express");
-const admin = require("../config/firebaseAdmin");
-const pool = require("../config/db");
-const authenticate = require("../middleware/authenticate");
+import express from "express";
+import admin from "../config/firebaseAdmin.js";
+import User from "../models/User.js";
+import authenticate from "../middleware/authenticate.js";
 
 const router = express.Router();
 
@@ -15,49 +15,50 @@ router.post("/sync-user", async (req, res) => {
     }
 
     const token = authHeader.split(" ")[1];
-
     const decoded = await admin.auth().verifyIdToken(token);
-    const { uid, email } = decoded;
 
-    const [rows] = await pool.query(
-      "SELECT role, is_active FROM users WHERE firebase_uid = ?",
-      [uid]
-    );
+    const { uid } = decoded;
 
-    if (!rows.length) {
+    const user = await User.findOne({ firebase_uid: uid });
+
+    if (!user) {
       return res.status(403).json({ message: "User not registered" });
     }
 
-    if (!rows[0].is_active) {
-      return res.status(403).json({ message: "User inactive" });
+    if (!user.is_active) {
+      return res.status(403).json({ message: "Account not activated" });
     }
 
-    // 🔥 IMPORTANT — RETURN ROLE
     return res.json({
-      message: "User synced successfully",
-      role: rows[0].role,
+      message: "User authenticated",
+      role: user.role,
     });
 
   } catch (error) {
-    console.error("VERIFY ERROR:", error);
+    console.error("Auth Error:", error);
     return res.status(401).json({ message: "Unauthorized" });
   }
 });
+
+// 🔵 HR ONLY ROUTE (Mongo Version)
 router.get("/hr-only", authenticate, async (req, res) => {
-  const [rows] = await pool.query(
-    "SELECT role FROM users WHERE firebase_uid = ?",
-    [req.user.uid]
-  );
+  try {
+    const user = await User.findOne({ firebase_uid: req.user.uid });
 
-  if (!rows.length) {
-    return res.status(403).json({ message: "User not found" });
+    if (!user) {
+      return res.status(403).json({ message: "User not found" });
+    }
+
+    if (user.role !== "HR") {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    res.json({ message: "Welcome HR" });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
   }
-
-  if (rows[0].role !== "HR") {
-    return res.status(403).json({ message: "Access denied" });
-  }
-
-  res.json({ message: "Welcome HR" });
 });
 
 // 🔵 PROTECTED TEST ROUTE
@@ -68,4 +69,4 @@ router.get("/protected", authenticate, (req, res) => {
   });
 });
 
-module.exports = router;
+export default router;
