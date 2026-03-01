@@ -16,6 +16,7 @@ const HrLayout = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const settingsActive = location.pathname === "/hr/settings";
 
   const handleLogout = () => {
     logout();
@@ -55,8 +56,10 @@ const HrLayout = () => {
           <div className="mt-6">
             <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Settings</p>
             <Link
-              to="/hr/dashboard"
-              className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              to="/hr/settings"
+              className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
+                settingsActive ? "bg-accent text-primary" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              }`}
             >
               <Settings className="h-4 w-4" />
               Configurations

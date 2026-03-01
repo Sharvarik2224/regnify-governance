@@ -14,6 +14,7 @@ import EmployeeDetail from "./pages/hr/EmployeeDetail";
 import HrApprovals from "./pages/hr/HrApprovals";
 import GovernanceAlerts from "./pages/hr/GovernanceAlerts";
 import AuditLogs from "./pages/hr/AuditLogs";
+import HrSettings from "./pages/hr/HrSettings";
 import ManagerLayout from "./components/layout/ManagerLayout";
 import ManagerDashboard from "./pages/manager/ManagerDashboard";
 import ManagerTeam from "./pages/manager/ManagerTeam";
@@ -62,6 +63,7 @@ const App = () => (
               <Route path="approvals" element={<HrApprovals />} />
               <Route path="governance-alerts" element={<GovernanceAlerts />} />
               <Route path="audit-logs" element={<AuditLogs />} />
+              <Route path="settings" element={<HrSettings />} />
             </Route>
 
             {/* Manager Routes */}

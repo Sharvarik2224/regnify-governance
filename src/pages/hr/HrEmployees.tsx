@@ -27,10 +27,82 @@ const statusStyle = (status: string) => {
   return "bg-muted text-muted-foreground border-border";
 };
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const ADD_EMPLOYEE_ENDPOINT = `${API_BASE_URL}/api/employees`;
+
+type AddEmployeeForm = {
+  full_name: string;
+  email: string;
+  department: string;
+  role: string;
+  phone: string;
+  probation_period: string;
+  manager_assigned: string;
+  date_of_joining: string;
+};
+
+const initialFormState: AddEmployeeForm = {
+  full_name: "",
+  email: "",
+  department: "",
+  role: "",
+  phone: "",
+  probation_period: "",
+  manager_assigned: "",
+  date_of_joining: "",
+};
+
 const HrEmployees = () => {
   const [search, setSearch] = useState("");
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [employeeForm, setEmployeeForm] = useState<AddEmployeeForm>(initialFormState);
 
   const filtered = employees.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()));
+
+  const updateField = (field: keyof AddEmployeeForm, value: string) => {
+    setEmployeeForm((previous) => ({ ...previous, [field]: value }));
+  };
+
+  const handleAddEmployee = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setFormError(null);
+
+    if (!employeeForm.role) {
+      setFormError("Role is required.");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch(ADD_EMPLOYEE_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(employeeForm),
+      });
+
+      if (!response.ok) {
+        const errorResponse = await response.json().catch(() => null);
+        const apiError =
+          errorResponse?.details ||
+          errorResponse?.error ||
+          `Employee creation failed with status ${response.status}`;
+
+        throw new Error(apiError);
+      }
+
+      setEmployeeForm(initialFormState);
+      setIsDialogOpen(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Unable to add employee. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -39,23 +111,118 @@ const HrEmployees = () => {
           <h1 className="text-2xl font-bold text-foreground">Employees Directory</h1>
           <p className="text-sm text-muted-foreground">Monitor employee status, risk factors, and probation periods across the enterprise.</p>
         </div>
-        <Dialog>
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
             <Button size="sm"><Plus className="mr-2 h-4 w-4" />Add Employee</Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-hidden">
             <DialogHeader>
               <DialogTitle>Add New Employee</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 mt-4">
-              {["Full Name", "Email", "Department", "Role", "Assigned Manager"].map((f) => (
-                <div key={f}>
-                  <Label>{f}</Label>
-                  <Input className="mt-1" placeholder={f} />
-                </div>
-              ))}
-              <Button className="w-full">Add Employee</Button>
-            </div>
+            <form className="space-y-4 mt-4 max-h-[72vh] overflow-y-auto pr-1" onSubmit={handleAddEmployee}>
+              <div>
+                <Label htmlFor="full_name">Full Name</Label>
+                <Input
+                  id="full_name"
+                  className="mt-1"
+                  placeholder="Full Name"
+                  value={employeeForm.full_name}
+                  onChange={(event) => updateField("full_name", event.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  className="mt-1"
+                  placeholder="Email"
+                  value={employeeForm.email}
+                  onChange={(event) => updateField("email", event.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="department">Department</Label>
+                <Input
+                  id="department"
+                  className="mt-1"
+                  placeholder="Department"
+                  value={employeeForm.department}
+                  onChange={(event) => updateField("department", event.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label>Role *</Label>
+                <Select value={employeeForm.role} onValueChange={(value) => updateField("role", value)}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select an option ..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Software Engineer">Software Engineer</SelectItem>
+                    <SelectItem value="HR Executive">HR Executive</SelectItem>
+                    <SelectItem value="Project Manager">Project Manager</SelectItem>
+                    <SelectItem value="Operations Associate">Operations Associate</SelectItem>
+                    <SelectItem value="Finance Analyst">Finance Analyst</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="phone">Phone</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  className="mt-1"
+                  placeholder="Phone"
+                  value={employeeForm.phone}
+                  onChange={(event) => updateField("phone", event.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="probation_period">Probation Period</Label>
+                <Input
+                  id="probation_period"
+                  className="mt-1"
+                  placeholder="Probation period"
+                  value={employeeForm.probation_period}
+                  onChange={(event) => updateField("probation_period", event.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="manager_assigned">Manager Assigned</Label>
+                <Input
+                  id="manager_assigned"
+                  className="mt-1"
+                  placeholder="Manager assigned"
+                  value={employeeForm.manager_assigned}
+                  onChange={(event) => updateField("manager_assigned", event.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="date_of_joining">Date of Joining</Label>
+                <Input
+                  id="date_of_joining"
+                  type="date"
+                  className="mt-1"
+                  value={employeeForm.date_of_joining}
+                  onChange={(event) => updateField("date_of_joining", event.target.value)}
+                />
+              </div>
+
+              {formError ? (
+                <p className="text-sm text-destructive">{formError}</p>
+              ) : null}
+
+              <Button className="w-full" type="submit" disabled={isSubmitting}>
+                {isSubmitting ? "Submitting..." : "Add Employee"}
+              </Button>
+            </form>
           </DialogContent>
         </Dialog>
       </div>
