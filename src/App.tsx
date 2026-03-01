@@ -22,7 +22,23 @@ import ManagerTaskNew from "./pages/manager/ManagerTaskNew";
 import ManagerEmployeeDetail from "./pages/manager/ManagerEmployeeDetail";
 import ManagerApprovals from "./pages/manager/ManagerApprovals";
 import ManagerAlerts from "./pages/manager/ManagerAlerts";
-import PlaceholderDashboard from "./pages/PlaceholderDashboard";
+import EmployeeLayout from "./components/layout/EmployeeLayout";
+import EmployeeDashboard from "./pages/employee/EmployeeDashboard";
+import MyTasks from "./pages/employee/MyTasks";
+import TaskDetail from "./pages/employee/TaskDetail";
+import Communication from "./pages/employee/Communication";
+import HRUpdates from "./pages/employee/HRUpdates";
+import PerformanceOverview from "./pages/employee/PerformanceOverview";
+import Attendance from "./pages/employee/Attendance";
+import Profile from "./pages/employee/Profile";
+import SiteHeadLayout from "./components/layout/SiteHeadLayout";
+import ExecutiveDashboard from "./pages/sitehead/ExecutiveDashboard";
+import PendingDecisions from "./pages/sitehead/PendingDecisions";
+import EmployeeReview from "./pages/sitehead/EmployeeReview";
+import PerformanceAnalytics from "./pages/sitehead/PerformanceAnalytics";
+import ApprovalHistory from "./pages/sitehead/ApprovalHistory";
+import SiteInsights from "./pages/sitehead/SiteInsights";
+import SiteHeadAuditLogs from "./pages/sitehead/SiteHeadAuditLogs";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -60,9 +76,30 @@ const App = () => (
               <Route path="alerts" element={<ManagerAlerts />} />
             </Route>
 
-            {/* Other role placeholders */}
-            <Route path="/employee/dashboard" element={<ProtectedRoute allowedRole="employee"><PlaceholderDashboard role="Employee" /></ProtectedRoute>} />
-            <Route path="/site-head/dashboard" element={<ProtectedRoute allowedRole="site-head"><PlaceholderDashboard role="Site Head" /></ProtectedRoute>} />
+            {/* Employee Routes */}
+            <Route path="/employee" element={<ProtectedRoute allowedRole="employee"><EmployeeLayout /></ProtectedRoute>}>
+              <Route index element={<EmployeeDashboard />} />
+              <Route path="dashboard" element={<EmployeeDashboard />} />
+              <Route path="tasks" element={<MyTasks />} />
+              <Route path="tasks/:taskId" element={<TaskDetail />} />
+              <Route path="communication" element={<Communication />} />
+              <Route path="hr-updates" element={<HRUpdates />} />
+              <Route path="performance" element={<PerformanceOverview />} />
+              <Route path="attendance" element={<Attendance />} />
+              <Route path="profile" element={<Profile />} />
+            </Route>
+
+            {/* Site Head Routes */}
+            <Route path="/site-head" element={<ProtectedRoute allowedRole="site-head"><SiteHeadLayout /></ProtectedRoute>}>
+              <Route index element={<ExecutiveDashboard />} />
+              <Route path="dashboard" element={<ExecutiveDashboard />} />
+              <Route path="pending" element={<PendingDecisions />} />
+              <Route path="review/:employeeId" element={<EmployeeReview />} />
+              <Route path="analytics" element={<PerformanceAnalytics />} />
+              <Route path="history" element={<ApprovalHistory />} />
+              <Route path="insights" element={<SiteInsights />} />
+              <Route path="audit" element={<SiteHeadAuditLogs />} />
+            </Route>
 
             <Route path="*" element={<NotFound />} />
           </Routes>
