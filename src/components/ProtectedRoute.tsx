@@ -1,21 +1,20 @@
-import { Navigate, useLocation } from "react-router-dom";
-import { useAuth, UserRole } from "@/contexts/AuthContext";
+import { Navigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 
-interface ProtectedRouteProps {
+interface Props {
   children: React.ReactNode;
-  allowedRole: UserRole;
+  allowedRole: string;
 }
 
-const ProtectedRoute = ({ children, allowedRole }: ProtectedRouteProps) => {
+const ProtectedRoute = ({ children, allowedRole }: Props) => {
   const { user, isAuthenticated } = useAuth();
-  const location = useLocation();
 
   if (!isAuthenticated) {
-    return <Navigate to={`/auth?role=${allowedRole}`} state={{ from: location }} replace />;
+    return <Navigate to="/" replace />;
   }
 
-  if (user?.role !== allowedRole) {
-    return <Navigate to={`/${user?.role}/dashboard`} replace />;
+  if (!user || user.role !== allowedRole) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
