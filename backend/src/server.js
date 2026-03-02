@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import crypto from "crypto";
 import { SignPdf } from 'node-signpdf';
 const signer = new SignPdf();
+const { plainAddPlaceholder } = require('node-signpdf/dist/helpers');
 
 
 
@@ -723,8 +724,16 @@ app.post('/sign', async (req, res) => {
     const pdfBuffer = Buffer.from(pdf, 'base64');
     const p12Buffer = Buffer.from(certificate, 'base64');
 
-    const signedPdf = signer.sign(pdfBuffer, p12Buffer, {
-      passphrase: process.env.CERT_PASSWORD, // ✅ from env
+    // ✅ STEP 1: Add signature placeholder
+    const pdfWithPlaceholder = plainAddPlaceholder({
+      pdfBuffer,
+      reason: 'Document Approval',
+      signatureLength: 8192,
+    });
+
+    // ✅ STEP 2: Sign the PDF
+    const signedPdf = signer.sign(pdfWithPlaceholder, p12Buffer, {
+      passphrase: process.env.CERT_PASSWORD,
     });
 
     res.json({
