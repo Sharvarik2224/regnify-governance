@@ -5,8 +5,9 @@ import { Binary, MongoClient, ObjectId } from "mongodb";
 import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
-import signer from "node-signpdf";
-import { plainAddPlaceholder } from "node-signpdf/dist/helpers/index.js";
+const { SignPdf } = require('node-signpdf');
+const signer = new SignPdf();
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -708,36 +709,31 @@ app.post("/api/document-audit", async (req, res) => {
 });
 
 //PDF signing endpoint - expects base64 encoded PDF and certificate, returns base64 encoded signed PDF
-app.post("/api/sign", async (req, res) => {
+app.post('/sign', async (req, res) => {
   try {
-    const { pdf, certificate } = req.body ?? {};
+    const { pdf, certificate } = req.body;
 
     if (!pdf || !certificate) {
       return res.status(400).json({
-        error: "Missing required fields: pdf and certificate",
+        error: 'Missing required fields: pdf and certificate'
       });
     }
 
-    const passphrase = process.env.CERT_PASSWORD;
-    if (!passphrase) {
-      return res.status(500).json({
-        error: "Certificate password not configured on server",
-      });
-    }
+    const pdfBuffer = Buffer.from(pdf, 'base64');
+    const p12Buffer = Buffer.from(certificate, 'base64');
 
-    const pdfBuffer = Buffer.from(pdf, "base64");
-    const p12Buffer = Buffer.from(certificate, "base64");
-    const pdfWithPlaceholder = plainAddPlaceholder({ pdfBuffer });
-    const signedPdf = signer.sign(pdfWithPlaceholder, p12Buffer, { passphrase });
-
-    return res.status(200).json({
-      signedPdf: signedPdf.toString("base64"),
+    const signedPdf = signer.sign(pdfBuffer, p12Buffer, {
+      passphrase: process.env.CERT_PASSWORD, // ✅ from env
     });
+
+    res.json({
+      signedPdf: signedPdf.toString('base64'),
+    });
+
   } catch (error) {
-    console.error("[PdfSigning] Signing error:", error?.message || error);
-    return res.status(500).json({
-      error: "Failed to sign PDF",
-      details: error?.message || "Unknown signing error",
+    res.status(500).json({
+      error: 'Failed to sign PDF',
+      details: error.message,
     });
   }
 });
