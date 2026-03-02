@@ -7,7 +7,9 @@ import { fileURLToPath } from "url";
 import crypto from "crypto";
 import { SignPdf } from 'node-signpdf';
 const signer = new SignPdf();
-const { plainAddPlaceholder } = require('node-signpdf/dist/helpers');
+import { plainAddPlaceholder } from 'node-signpdf/dist/helpers/index.js';
+
+dotenv.config();
 
 
 
