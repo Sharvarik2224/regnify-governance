@@ -5,8 +5,9 @@ import { Binary, MongoClient, ObjectId } from "mongodb";
 import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
-const { SignPdf } = require('node-signpdf');
+import { SignPdf } from 'node-signpdf';
 const signer = new SignPdf();
+
 
 
 const __filename = fileURLToPath(import.meta.url);
