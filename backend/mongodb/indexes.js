@@ -11,6 +11,7 @@ const mongoUri = process.env.MONGODB_URI;
 const mongoDbName = process.env.MONGODB_DB_NAME || "regnify_hr";
 const mongoEmployeesCollection = process.env.MONGODB_EMPLOYEES_COLLECTION || "employees";
 const mongoSignaturesCollection = process.env.MONGODB_SIGNATURES_COLLECTION || "signatures";
+const mongoDigitalCertificatesCollection = process.env.MONGODB_DIGITAL_CERTIFICATES_COLLECTION || "digital_certificates";
 const mongoDocumentAuditCollection = process.env.MONGODB_DOCUMENT_AUDIT_COLLECTION || "document_audit";
 const mongoHrDataCollection = process.env.MONGODB_HR_DATA_COLLECTION || "hr_data";
 
@@ -29,6 +30,7 @@ const run = async () => {
 
   await db.collection(mongoSignaturesCollection).createIndex({ hr_id: 1, uploaded_at: -1 });
   await db.collection(mongoSignaturesCollection).createIndex({ hr_id: 1, status: 1, uploaded_at: -1 });
+  await db.collection(mongoDigitalCertificatesCollection).createIndex({ hr_id: 1 }, { unique: true });
 
   await db.collection(mongoDocumentAuditCollection).createIndex({ document_id: 1 });
   await db.collection(mongoDocumentAuditCollection).createIndex({ workflow_id: 1 });
