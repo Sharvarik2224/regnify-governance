@@ -17,7 +17,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-const port = Number(process.env.PORT || 5000);
+const port = Number(process.env.PORT);
 const mongoUri = process.env.MONGODB_URI;
 const mongoDbName = process.env.MONGODB_DB_NAME || "regnify_hr";
 const mongoEmployeesCollection = process.env.MONGODB_EMPLOYEES_COLLECTION || "employees";
@@ -25,7 +25,7 @@ const mongoSignaturesCollection = process.env.MONGODB_SIGNATURES_COLLECTION || "
 const mongoDigitalCertificatesCollection = process.env.MONGODB_DIGITAL_CERTIFICATES_COLLECTION || "digital_certificates";
 const mongoDocumentAuditCollection = process.env.MONGODB_DOCUMENT_AUDIT_COLLECTION || "document_audit";
 const mongoHrDataCollection = process.env.MONGODB_HR_DATA_COLLECTION || "hr_data";
-const publicBaseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${port}`;
+const publicBaseUrl = process.env.PUBLIC_BASE_URL
 
 if (!mongoUri) {
   throw new Error("MONGODB_URI is required.");
@@ -492,9 +492,9 @@ app.post("/api/signatures/upload", async (req, res) => {
     return res.status(400).json({ error: "hr_id, file_name, mime_type and file_base64 are required" });
   }
 
-  const allowedMimeTypes = ["image/png", "image/jpeg"];
+  const allowedMimeTypes = ["image/png", "image/jpeg","image/jpg"];
   if (!allowedMimeTypes.includes(mime_type)) {
-    return res.status(400).json({ error: "Only image/png or image/jpeg signatures are supported" });
+    return res.status(400).json({ error: "Only image/png or image/jpeg or image/jpg signatures are supported" });
   }
 
   try {
