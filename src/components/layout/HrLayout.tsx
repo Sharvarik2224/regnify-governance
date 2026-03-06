@@ -18,8 +18,8 @@ const HrLayout = () => {
   const navigate = useNavigate();
   const settingsActive = location.pathname === "/hr/settings";
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate("/");
   };
 
@@ -97,6 +97,9 @@ const HrLayout = () => {
               <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-destructive" />
             </button>
             <span className="rounded-full border border-primary px-3 py-1 text-xs font-semibold text-primary">HR ADMIN</span>
+            <Button variant="outline" size="sm" onClick={handleLogout}>
+              Logout
+            </Button>
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-warning text-primary-foreground text-xs font-bold">
               {user?.name?.charAt(0)?.toUpperCase() || "U"}
             </div>

@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { SignPdf } from 'node-signpdf';
 const signer = new SignPdf();
 import { plainAddPlaceholder } from 'node-signpdf/dist/helpers/index.js';
+import createAuthRoutes from "./routes/auth.routes.js";
 
 dotenv.config();
 
@@ -53,6 +54,8 @@ app.use((req, res, next) => {
 app.get("/api/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
+
+app.use("/api", createAuthRoutes({ getDb: () => db }));
 
 const parseDataUrlToBuffer = (dataUrl) => {
   const base64Payload = String(dataUrl).includes(",")

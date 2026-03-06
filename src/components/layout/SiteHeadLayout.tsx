@@ -2,6 +2,7 @@ import { Link, useLocation, Outlet, useNavigate } from "react-router-dom";
 import { Shield, LayoutDashboard, ClipboardCheck, Users, BarChart3, History, Lightbulb, FileText, Settings, Search, Bell, LogOut } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const menuItems = [
   { label: "Executive Dashboard", icon: LayoutDashboard, path: "/site-head/dashboard" },
@@ -21,8 +22,8 @@ const SiteHeadLayout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate("/");
   };
 
@@ -104,6 +105,9 @@ const SiteHeadLayout = () => {
               <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-destructive" />
             </button>
             <span className="rounded-full border border-primary px-3 py-1 text-xs font-semibold text-primary">SITE HEAD</span>
+            <Button variant="outline" size="sm" onClick={handleLogout}>
+              Logout
+            </Button>
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
               {user?.name?.charAt(0)?.toUpperCase() || "A"}
             </div>

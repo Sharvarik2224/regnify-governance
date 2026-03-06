@@ -2,6 +2,7 @@ import { Link, useLocation, Outlet, useNavigate } from "react-router-dom";
 import { Shield, LayoutDashboard, Users, CheckSquare, AlertTriangle, Settings, Search, Bell, LogOut, ClipboardList } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const menuItems = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/manager/dashboard" },
@@ -16,8 +17,8 @@ const ManagerLayout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate("/");
   };
 
@@ -88,6 +89,9 @@ const ManagerLayout = () => {
           </div>
           <div className="flex items-center gap-4">
             <span className="rounded-full border border-primary px-3 py-1 text-xs font-semibold text-primary">MANAGER</span>
+            <Button variant="outline" size="sm" onClick={handleLogout}>
+              Logout
+            </Button>
             <button className="relative text-muted-foreground hover:text-foreground">
               <Bell className="h-5 w-5" />
               <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-destructive" />

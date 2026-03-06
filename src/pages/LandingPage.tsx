@@ -39,7 +39,7 @@ const LandingPage = () => {
             </div>
             <span className="text-lg font-bold text-foreground tracking-tight">REGNIFY</span>
           </div>
-          <Button variant="outline" size="sm" onClick={() => navigate("/auth")}>
+          <Button variant="outline" size="sm" onClick={() => navigate("/auth?mode=login")}>
             Login
           </Button>
         </div>
@@ -136,7 +136,7 @@ const LandingPage = () => {
             {roles.map((r) => (
               <button
                 key={r.id}
-                onClick={() => navigate(`/auth?role=${r.id}`)}
+                onClick={() => navigate(`/auth?role=${r.id}&mode=signup`)}
                 className="group rounded-lg border border-border bg-card p-6 text-left hover:border-primary hover:shadow-md transition-all"
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-accent group-hover:bg-primary/10 transition-colors">
