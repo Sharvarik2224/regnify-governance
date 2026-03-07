@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Save, Upload, RefreshCw, ShieldCheck, ShieldX, KeyRound } from "lucide-react";
+import { Save, Upload, RefreshCw, ShieldCheck, ShieldX, KeyRound, Download } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +70,7 @@ const HrSettings = () => {
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [isSavingDigitalCertificate, setIsSavingDigitalCertificate] = useState(false);
   const [isGeneratingDigitalCertificate, setIsGeneratingDigitalCertificate] = useState(false);
+  const [isDownloadingDigitalCertificate, setIsDownloadingDigitalCertificate] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [certificateMessage, setCertificateMessage] = useState<string>("");
@@ -410,6 +411,54 @@ const HrSettings = () => {
     }
   };
 
+  const handleDownloadDigitalCertificate = async () => {
+    setIsDownloadingDigitalCertificate(true);
+    setCertificateError("");
+    setCertificateMessage("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/generate-certificate/download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: profile.hrName || "HR",
+          email: profile.officialEmail || hrId,
+          company: profile.organizationName || "Regnify",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null);
+        throw new Error(errorPayload?.error || `Certificate download failed (${response.status})`);
+      }
+
+      const blob = await response.blob();
+      if (!blob.size) {
+        throw new Error("Received empty certificate file from server.");
+      }
+
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const fileNameMatch = contentDisposition.match(/filename\*?=(?:UTF-8''|\")?([^\";]+)/i);
+      const fileName = fileNameMatch?.[1] ? decodeURIComponent(fileNameMatch[1].replace(/\"/g, "")) : "certificate.p12";
+
+      const fileUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = fileUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(fileUrl);
+
+      setCertificateFileName(fileName);
+      setCertificateMessage("Digital certificate downloaded successfully.");
+    } catch (error) {
+      setCertificateError(error instanceof Error ? error.message : "Unable to download digital certificate.");
+    } finally {
+      setIsDownloadingDigitalCertificate(false);
+    }
+  };
+
   const handleSaveProfile = async () => {
     setIsSavingProfile(true);
     setProfileError("");
@@ -675,6 +724,13 @@ const HrSettings = () => {
               <Button size="sm" onClick={handleSaveDigitalCertificate} disabled={isSavingDigitalCertificate}>
                 <Save className="mr-2 h-4 w-4" />
                 {isSavingDigitalCertificate ? "Saving..." : "Save Digital Certificate"}
+              </Button>
+            </div>
+
+            <div className="flex justify-end">
+              <Button size="sm" variant="outline" onClick={handleDownloadDigitalCertificate} disabled={isDownloadingDigitalCertificate}>
+                <Download className="mr-2 h-4 w-4" />
+                {isDownloadingDigitalCertificate ? "Downloading..." : "Download Certificate"}
               </Button>
             </div>
           </div>

@@ -59,6 +59,22 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api", createAuthRoutes({ getDb: () => db }));
 
+const getCertificateWebhookUrls = () => {
+  const configuredWebhookUrl = process.env.N8N_CERTIFICATE_WEBHOOK_URL;
+  const defaultTestUrl = "https://regnify.app.n8n.cloud/webhook-test/certificate-gen";
+  const fallbackProdUrl = "https://regnify.app.n8n.cloud/webhook/certificate-gen";
+
+  if (!configuredWebhookUrl) {
+    return [defaultTestUrl, fallbackProdUrl];
+  }
+
+  if (configuredWebhookUrl.includes("/webhook-test/")) {
+    return [configuredWebhookUrl, fallbackProdUrl];
+  }
+
+  return [configuredWebhookUrl];
+};
+
 app.post("/api/generate-certificate", async (req, res) => {
   const { name, email, company } = req.body ?? {};
 
@@ -68,13 +84,7 @@ app.post("/api/generate-certificate", async (req, res) => {
 
   try {
     const payload = { name, email, company };
-    const configuredWebhookUrl = process.env.N8N_CERTIFICATE_WEBHOOK_URL;
-    const defaultTestUrl = "https://regnify.app.n8n.cloud/webhook-test/certificate-gen";
-    const fallbackProdUrl = "https://regnify.app.n8n.cloud/webhook/certificate-gen";
-
-    const webhookUrls = configuredWebhookUrl
-      ? [configuredWebhookUrl]
-      : [defaultTestUrl, fallbackProdUrl];
+    const webhookUrls = getCertificateWebhookUrls();
 
     let finalResponse = null;
     let finalData = null;
@@ -123,6 +133,79 @@ app.post("/api/generate-certificate", async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       error: "Unable to trigger certificate generation webhook",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.post("/api/generate-certificate/download", async (req, res) => {
+  const { name, email, company } = req.body ?? {};
+
+  if (!name || !email || !company) {
+    return res.status(400).json({ error: "name, email and company are required" });
+  }
+
+  try {
+    const payload = { name, email, company };
+    const webhookUrls = getCertificateWebhookUrls();
+
+    for (const webhookUrl of webhookUrls) {
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      // Retry production URL if webhook-test listener is inactive.
+      if (response.status === 404 && webhookUrl.includes("/webhook-test/")) {
+        continue;
+      }
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        let details;
+
+        try {
+          details = responseText ? JSON.parse(responseText) : null;
+        } catch {
+          details = responseText || null;
+        }
+
+        return res.status(502).json({
+          error: "Certificate generation webhook failed",
+          details,
+        });
+      }
+
+      const contentType = response.headers.get("content-type") || "application/octet-stream";
+
+      // If workflow responded with JSON, surface it instead of forcing file download.
+      if (contentType.includes("application/json")) {
+        const payloadData = await response.json().catch(() => null);
+        return res.status(502).json({
+          error: "Webhook returned JSON instead of certificate binary",
+          details: payloadData,
+        });
+      }
+
+      const contentDisposition =
+        response.headers.get("content-disposition") ||
+        `attachment; filename="${String(email).split("@")[0] || "certificate"}.p12"`;
+
+      const certificateBinary = Buffer.from(await response.arrayBuffer());
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", contentDisposition);
+      res.setHeader("Content-Length", String(certificateBinary.length));
+      return res.status(200).send(certificateBinary);
+    }
+
+    return res.status(502).json({ error: "No webhook response received" });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Unable to download digital certificate",
       details: error instanceof Error ? error.message : "Unknown error",
     });
   }
