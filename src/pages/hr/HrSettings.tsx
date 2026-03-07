@@ -63,13 +63,13 @@ const HrSettings = () => {
   const [organizationLogoFileName, setOrganizationLogoFileName] = useState<string>("");
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [organizationLogoFile, setOrganizationLogoFile] = useState<File | null>(null);
-  const [digitalSigningEnabled, setDigitalSigningEnabled] = useState(false);
   const [isLoadingSignature, setIsLoadingSignature] = useState(false);
   const [isUploadingSignature, setIsUploadingSignature] = useState(false);
   const [isRevokingSignature, setIsRevokingSignature] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [isSavingDigitalCertificate, setIsSavingDigitalCertificate] = useState(false);
+  const [isGeneratingDigitalCertificate, setIsGeneratingDigitalCertificate] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [certificateMessage, setCertificateMessage] = useState<string>("");
@@ -249,7 +249,6 @@ const HrSettings = () => {
       }
 
       setCertificateFileName(digitalCertificate.file_name || "");
-      setDigitalSigningEnabled(Boolean(digitalCertificate.digital_signing_enabled));
     } catch {
       // no-op for initial load
     }
@@ -357,7 +356,7 @@ const HrSettings = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           hr_id: hrId,
-          digital_signing_enabled: digitalSigningEnabled,
+          digital_signing_enabled: true,
           file_name: certificateFile?.name || null,
           mime_type: certificateFile?.type || "application/x-pkcs12",
           file_base64: certificateBase64,
@@ -380,6 +379,34 @@ const HrSettings = () => {
       setCertificateError(error instanceof Error ? error.message : "Unable to save digital certificate settings.");
     } finally {
       setIsSavingDigitalCertificate(false);
+    }
+  };
+
+  const handleGenerateDigitalCertificate = async () => {
+    setIsGeneratingDigitalCertificate(true);
+    setCertificateError("");
+    setCertificateMessage("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/generate-certificate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: profile.hrName || "HR",
+          email: profile.officialEmail || hrId,
+          company: profile.organizationName || "Regnify",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Certificate generation trigger failed (${response.status})`);
+      }
+
+      setCertificateMessage("Digital certificate generation request sent successfully.");
+    } catch (error) {
+      setCertificateError(error instanceof Error ? error.message : "Unable to trigger digital certificate generation.");
+    } finally {
+      setIsGeneratingDigitalCertificate(false);
     }
   };
 
@@ -640,15 +667,11 @@ const HrSettings = () => {
               <p className="mt-1 text-xs text-muted-foreground">Optional for certificate-based signing workflows.</p>
             </div>
 
-            <div className="flex items-center justify-between rounded-md border border-border p-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">Enable Digital Signing</p>
-                <p className="text-xs text-muted-foreground">Use certificate workflow for signed documents.</p>
-              </div>
-              <Switch checked={digitalSigningEnabled} onCheckedChange={setDigitalSigningEnabled} />
-            </div>
-
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={handleGenerateDigitalCertificate} disabled={isGeneratingDigitalCertificate}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                {isGeneratingDigitalCertificate ? "Generating..." : "Generate Digital Certificate"}
+              </Button>
               <Button size="sm" onClick={handleSaveDigitalCertificate} disabled={isSavingDigitalCertificate}>
                 <Save className="mr-2 h-4 w-4" />
                 {isSavingDigitalCertificate ? "Saving..." : "Save Digital Certificate"}
