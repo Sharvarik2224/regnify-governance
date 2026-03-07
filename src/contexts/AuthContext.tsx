@@ -48,7 +48,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
 
   const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+    (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000").trim();
 
   const isUserRole = (role: string): role is UserRole => {
     return role === "hr" || role === "manager" || role === "employee" || role === "site-head";
@@ -76,6 +76,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           throw new Error(data?.message || "Role mismatch for this account.");
         }
 
+        if (response.status === 401) {
+          const data = await response.json().catch(() => null);
+          throw new Error(data?.details || data?.message || "Authentication token rejected by backend.");
+        }
+
         console.warn("Role sync failed with status", response.status);
         return null;
       }
@@ -86,7 +91,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return isUserRole(role) ? role : null;
     } catch (error) {
       console.warn("Role sync unavailable", error);
-      return null;
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error("Role sync unavailable");
     }
   };
 
@@ -95,6 +103,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     password: string,
     requestedRole?: UserRole
   ): Promise<UserRole> => {
+    if (!requestedRole) {
+      throw new Error("Role is required for login. Please open login from your role card.");
+    }
+
     try {
       await signInWithEmailAndPassword(auth, email, password);
     } catch (error: any) {
@@ -151,12 +163,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       throw new Error("Email not verified. Verification link has been sent to your email.");
     }
 
-    const token = await firebaseUser.getIdToken();
+    const token = await firebaseUser.getIdToken(true);
     console.log("🔥 Firebase token:", token);
 
     const role = await syncUserRole(token, requestedRole);
 
-    const resolvedRole = role || "employee";
+    if (!role) {
+      throw new Error(`Unable to verify ${requestedRole.toUpperCase()} role. Please try again.`);
+    }
+
+    const resolvedRole = role;
 
     setUser({
       name:

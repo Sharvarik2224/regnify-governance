@@ -45,6 +45,15 @@ const AuthPage = () => {
       let role: "hr" | "manager" | "employee" | "site-head";
 
       if (mode === "login") {
+        if (!selectedRole) {
+          toast({
+            title: "Role required",
+            description: "Open login from your role card so we can sign you in to the right dashboard.",
+            variant: "destructive",
+          });
+          return;
+        }
+
         role = await login(form.email, form.password, selectedRole);
       } else {
         if (!selectedRole) {

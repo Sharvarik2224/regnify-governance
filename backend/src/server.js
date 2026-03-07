@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import admin from "firebase-admin";
 import { Binary, MongoClient, ObjectId } from "mongodb";
 import path from "path";
 import { fileURLToPath } from "url";

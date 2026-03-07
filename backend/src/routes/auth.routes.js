@@ -61,7 +61,21 @@ const createAuthRoutes = ({ getDb, usersCollectionName = process.env.MONGODB_USE
       });
     } catch (error) {
       console.error("[SyncUser] Auth error:", error);
-      return res.status(401).json({ message: "Unauthorized" });
+
+      const message = error instanceof Error
+        ? error.message
+        : "Unauthorized";
+
+      const isConfigError =
+        message.includes("service account") ||
+        message.includes("FIREBASE_SERVICE_ACCOUNT_JSON") ||
+        message.includes("Unexpected token") ||
+        message.includes("JSON");
+
+      return res.status(isConfigError ? 500 : 401).json({
+        message: isConfigError ? "Firebase Admin configuration error" : "Unauthorized",
+        details: message,
+      });
     }
   });
 
