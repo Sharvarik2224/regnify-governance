@@ -9,6 +9,7 @@ import { SignPdf } from 'node-signpdf';
 const signer = new SignPdf();
 import { plainAddPlaceholder } from 'node-signpdf/dist/helpers/index.js';
 import createAuthRoutes from "./routes/auth.routes.js";
+import { cleanupGeneratedCertificate, generateCertificate } from "./generateCert.js";
 
 dotenv.config();
 
@@ -56,6 +57,109 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api", createAuthRoutes({ getDb: () => db }));
+
+app.post("/api/generate-certificate", async (req, res) => {
+  const { name, email, company } = req.body ?? {};
+
+  if (!name || !email || !company) {
+    return res.status(400).json({ error: "name, email and company are required" });
+  }
+
+  try {
+    const payload = { name, email, company };
+    const configuredWebhookUrl = process.env.N8N_CERTIFICATE_WEBHOOK_URL;
+    const defaultTestUrl = "https://regnify.app.n8n.cloud/webhook-test/certificate-gen";
+    const fallbackProdUrl = "https://regnify.app.n8n.cloud/webhook/certificate-gen";
+
+    const webhookUrls = configuredWebhookUrl
+      ? [configuredWebhookUrl]
+      : [defaultTestUrl, fallbackProdUrl];
+
+    let finalResponse = null;
+    let finalData = null;
+
+    for (const webhookUrl of webhookUrls) {
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const responseText = await response.text();
+      let data;
+
+      try {
+        data = responseText ? JSON.parse(responseText) : { message: "Webhook triggered successfully" };
+      } catch {
+        data = { message: responseText || "Webhook triggered successfully" };
+      }
+
+      finalResponse = response;
+      finalData = data;
+
+      // If webhook-test is not active (404), retry production webhook URL.
+      if (response.status === 404 && webhookUrl.includes("/webhook-test/")) {
+        continue;
+      }
+
+      break;
+    }
+
+    if (!finalResponse) {
+      return res.status(502).json({ error: "No webhook response received" });
+    }
+
+    if (!finalResponse.ok) {
+      return res.status(502).json({
+        error: "Certificate generation webhook failed",
+        details: finalData,
+      });
+    }
+
+    return res.status(200).json(finalData);
+  } catch (error) {
+    return res.status(500).json({
+      error: "Unable to trigger certificate generation webhook",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.post("/generate", async (req, res) => {
+  const { name, email, company } = req.body ?? {};
+
+  if (!name || !email || !company) {
+    return res.status(400).json({ error: "name, email and company are required" });
+  }
+
+  let cleanupPath = "";
+
+  try {
+    const generated = await generateCertificate(name, email, company);
+    cleanupPath = generated.cleanupPath;
+
+    return res.download(generated.filePath, "certificate.p12", async (downloadError) => {
+      await cleanupGeneratedCertificate(cleanupPath).catch(() => {
+        // Ignore cleanup errors after response lifecycle.
+      });
+
+      if (downloadError) {
+        console.error("[GenerateCertificate] Download error:", downloadError);
+      }
+    });
+  } catch (error) {
+    await cleanupGeneratedCertificate(cleanupPath).catch(() => {
+      // Ignore cleanup errors while handling request errors.
+    });
+
+    return res.status(500).json({
+      error: "Unable to generate certificate",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
 
 const parseDataUrlToBuffer = (dataUrl) => {
   const base64Payload = String(dataUrl).includes(",")
@@ -815,6 +919,7 @@ const startServer = async () => {
 
   app.listen(port, () => {
     console.log(`Backend server running on http://localhost:${port}`);
+    console.log("Certificate service running");
     console.log(`[Startup] MongoDB connected: true`);
     console.log(`[Startup] MongoDB database: ${mongoDbName}`);
     console.log(`[Startup] Employees collection: ${mongoEmployeesCollection}`);
