@@ -14,6 +14,7 @@ const mongoSignaturesCollection = process.env.MONGODB_SIGNATURES_COLLECTION || "
 const mongoDigitalCertificatesCollection = process.env.MONGODB_DIGITAL_CERTIFICATES_COLLECTION || "digital_certificates";
 const mongoDocumentAuditCollection = process.env.MONGODB_DOCUMENT_AUDIT_COLLECTION || "document_audit";
 const mongoHrDataCollection = process.env.MONGODB_HR_DATA_COLLECTION || "hr_data";
+const mongoAuditLogsCollection = process.env.MONGODB_AUDIT_LOGS_COLLECTION || "audit_logs";
 
 if (!mongoUri) {
   throw new Error("MONGODB_URI is required.");
@@ -35,6 +36,8 @@ const run = async () => {
   await db.collection(mongoDocumentAuditCollection).createIndex({ document_id: 1 });
   await db.collection(mongoDocumentAuditCollection).createIndex({ workflow_id: 1 });
   await db.collection(mongoDocumentAuditCollection).createIndex({ signed_at: -1 });
+  await db.collection(mongoAuditLogsCollection).createIndex({ timestamp: -1 });
+  await db.collection(mongoAuditLogsCollection).createIndex({ actor: 1, timestamp: -1 });
 
   console.log("MongoDB indexes created successfully.");
 };

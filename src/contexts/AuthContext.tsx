@@ -98,12 +98,37 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const reportLoginFailure = async (
+    email: string,
+    reason: string,
+    requestedRole?: UserRole,
+    stage: "firebase" | "role-sync" | "post-auth" = "firebase",
+  ) => {
+    try {
+      await fetch(`${API_BASE_URL}/api/login-failed`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          reason,
+          requestedRole: requestedRole || null,
+          stage,
+        }),
+      });
+    } catch (error) {
+      console.warn("Login failure audit log failed", error);
+    }
+  };
+
   const login = async (
     email: string,
     password: string,
     requestedRole?: UserRole
   ): Promise<UserRole> => {
     if (!requestedRole) {
+      await reportLoginFailure(email, "Role not provided", requestedRole, "post-auth");
       throw new Error("Role is required for login. Please open login from your role card.");
     }
 
@@ -130,7 +155,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         );
 
         const code = prompt("Enter OTP");
-        if (!code) throw new Error("OTP required");
+        if (!code) {
+          await reportLoginFailure(email, "OTP required", requestedRole, "firebase");
+          throw new Error("OTP required");
+        }
 
         const credential = PhoneAuthProvider.credential(
           verificationId,
@@ -143,14 +171,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await resolver.resolveSignIn(multiFactorAssertion);
       } else {
         if (error?.code === "auth/invalid-credential" || error?.code === "auth/invalid-login-credentials") {
+          await reportLoginFailure(email, "Invalid email or password", requestedRole, "firebase");
           throw new Error("Invalid email or password.");
         }
+
+        await reportLoginFailure(email, error?.message || "Firebase login failed", requestedRole, "firebase");
         throw error;
       }
     }
 
     const firebaseUser = auth.currentUser;
-    if (!firebaseUser) throw new Error("Login failed");
+    if (!firebaseUser) {
+      await reportLoginFailure(email, "Login failed", requestedRole, "post-auth");
+      throw new Error("Login failed");
+    }
 
     if (!firebaseUser.emailVerified) {
       try {
@@ -160,15 +194,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       await auth.signOut();
+      await reportLoginFailure(email, "Email not verified", requestedRole, "post-auth");
       throw new Error("Email not verified. Verification link has been sent to your email.");
     }
 
     const token = await firebaseUser.getIdToken(true);
     console.log("🔥 Firebase token:", token);
 
-    const role = await syncUserRole(token, requestedRole);
+    const role = await syncUserRole(token, requestedRole).catch(async (error) => {
+      await reportLoginFailure(email, error instanceof Error ? error.message : "Role sync failed", requestedRole, "role-sync");
+      throw error;
+    });
 
     if (!role) {
+      await reportLoginFailure(email, "Unable to verify role", requestedRole, "role-sync");
       throw new Error(`Unable to verify ${requestedRole.toUpperCase()} role. Please try again.`);
     }
 
@@ -213,6 +252,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const logout = async () => {
+    const firebaseUser = auth.currentUser;
+
+    if (firebaseUser) {
+      try {
+        const token = await firebaseUser.getIdToken();
+
+        await fetch(`${API_BASE_URL}/api/logout`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            role: user?.role || null,
+          }),
+        });
+      } catch (error) {
+        console.warn("Logout audit log failed", error);
+      }
+    }
+
     await auth.signOut();
     setUser(null);
   };

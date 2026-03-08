@@ -11,7 +11,6 @@ const signer = new SignPdf();
 import { plainAddPlaceholder } from 'node-signpdf/dist/helpers/index.js';
 import createAuthRoutes from "./routes/auth.routes.js";
 import { cleanupGeneratedCertificate, generateCertificate } from "./generateCert.js";
-
 dotenv.config();
 
 
@@ -28,6 +27,7 @@ const mongoSignaturesCollection = process.env.MONGODB_SIGNATURES_COLLECTION || "
 const mongoDigitalCertificatesCollection = process.env.MONGODB_DIGITAL_CERTIFICATES_COLLECTION || "digital_certificates";
 const mongoDocumentAuditCollection = process.env.MONGODB_DOCUMENT_AUDIT_COLLECTION || "document_audit";
 const mongoHrDataCollection = process.env.MONGODB_HR_DATA_COLLECTION || "hr_data";
+const mongoAuditLogsCollection = process.env.MONGODB_AUDIT_LOGS_COLLECTION || "audit_logs";
 const publicBaseUrl = process.env.PUBLIC_BASE_URL
 
 if (!mongoUri) {
@@ -40,6 +40,77 @@ const mongoClient = new MongoClient(mongoUri, {
 let db;
 
 const app = express();
+
+const buildAuditHash = (payload) => crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+const auditStreamClients = new Set();
+const allowedAuditActions = new Set([
+  "Employee Created",
+  "Login Success",
+  "Login Failed",
+  "Logout Success",
+  "Offer Letter Generated",
+  "Certificate Generation Triggered",
+  "Digital Certificate Generated",
+  "Uploading .p12 to database",
+  "Profile Data Updated",
+]);
+
+const toApiAuditLog = (logDocument) => ({
+  id: logDocument._id?.toString?.() || logDocument.id,
+  timestamp: logDocument.timestamp,
+  actor: logDocument.actor,
+  action: logDocument.action,
+  entity: logDocument.entity,
+  entityId: logDocument.entityId ?? null,
+  metadata: logDocument.metadata ?? {},
+  hash: logDocument.hash,
+});
+
+const broadcastAuditLog = (logDocument) => {
+  const payload = `data: ${JSON.stringify(toApiAuditLog(logDocument))}\n\n`;
+  for (const client of auditStreamClients) {
+    client.write(payload);
+  }
+};
+
+const deriveActorFromRequest = (req) => {
+  return (
+    req?.user?.role ||
+    req?.user?.name ||
+    req?.body?.hr_id ||
+    req?.body?.official_email ||
+    req?.body?.email ||
+    "System"
+  );
+};
+
+const logAudit = async ({ actor, action, entity, entityId = null, metadata = {} }) => {
+  if (!db || !allowedAuditActions.has(action)) {
+    return;
+  }
+
+  try {
+    const timestamp = new Date();
+    const entry = {
+      timestamp,
+      actor: actor || "System",
+      action,
+      entity,
+      entityId,
+      metadata,
+    };
+
+    const hash = buildAuditHash(entry);
+    const insertResult = await db.collection(mongoAuditLogsCollection).insertOne({ ...entry, hash });
+    broadcastAuditLog({
+      _id: insertResult.insertedId,
+      ...entry,
+      hash,
+    });
+  } catch (auditError) {
+    console.error("[AuditLog] Unable to persist audit log:", auditError);
+  }
+};
 
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
@@ -57,7 +128,21 @@ app.get("/api/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-app.use("/api", createAuthRoutes({ getDb: () => db }));
+app.get("/api/audit-logs/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+
+  res.write("retry: 2500\n\n");
+  auditStreamClients.add(res);
+
+  req.on("close", () => {
+    auditStreamClients.delete(res);
+  });
+});
+
+app.use("/api", createAuthRoutes({ getDb: () => db, logAudit }));
 
 const getCertificateWebhookUrls = () => {
   const configuredWebhookUrl = process.env.N8N_CERTIFICATE_WEBHOOK_URL;
@@ -129,6 +214,17 @@ app.post("/api/generate-certificate", async (req, res) => {
       });
     }
 
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "Certificate Generation Triggered",
+      entity: "Certificate",
+      entityId: String(email || ""),
+      metadata: {
+        candidate: name,
+        company,
+      },
+    });
+
     return res.status(200).json(finalData);
   } catch (error) {
     return res.status(500).json({
@@ -196,6 +292,18 @@ app.post("/api/generate-certificate/download", async (req, res) => {
 
       const certificateBinary = Buffer.from(await response.arrayBuffer());
 
+      await logAudit({
+        actor: deriveActorFromRequest(req),
+        action: "Digital Certificate Downloaded",
+        entity: "HR Certificate",
+        entityId: String(email || ""),
+        metadata: {
+          certificateType: "PKCS12",
+          candidate: name,
+          company,
+        },
+      });
+
       res.setHeader("Content-Type", contentType);
       res.setHeader("Content-Disposition", contentDisposition);
       res.setHeader("Content-Length", String(certificateBinary.length));
@@ -223,6 +331,18 @@ app.post("/generate", async (req, res) => {
   try {
     const generated = await generateCertificate(name, email, company);
     cleanupPath = generated.cleanupPath;
+
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "Digital Certificate Generated",
+      entity: "HR Certificate",
+      entityId: String(email || ""),
+      metadata: {
+        certificateType: "PKCS12",
+        candidate: name,
+        company,
+      },
+    });
 
     return res.download(generated.filePath, "certificate.p12", async (downloadError) => {
       await cleanupGeneratedCertificate(cleanupPath).catch(() => {
@@ -369,6 +489,18 @@ app.post("/api/hr-data/profile", async (req, res) => {
       { upsert: true },
     );
 
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "Profile Data Updated",
+      entity: "HR Profile",
+      entityId: hr_id,
+      metadata: {
+        hr_name: hr_name ?? "",
+        official_email,
+        department: department ?? "",
+      },
+    });
+
     const savedData = await db.collection(mongoHrDataCollection).findOne(
       { hr_id },
       {
@@ -480,6 +612,18 @@ app.post("/api/hr-data/workflow-manual-offer-letter", async (req, res) => {
     };
 
     const result = await db.collection(mongoDocumentAuditCollection).insertOne(payload);
+
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "Offer Letter Generated",
+      entity: "Offer Letter",
+      entityId: result.insertedId.toString(),
+      metadata: {
+        hr_id,
+        file_name,
+        mime_type,
+      },
+    });
 
     return res.status(201).json({
       message: "Manual offer letter template stored",
@@ -849,6 +993,31 @@ app.post("/api/digital-certificates/save", async (req, res) => {
       { projection: { file_data: 0 } },
     );
 
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: hasFilePayload ? "Digital Certificate Generated" : "Profile Data Updated",
+      entity: "HR Certificate",
+      entityId: hr_id,
+      metadata: {
+        certificateType: hasFilePayload ? "PKCS12" : null,
+        digital_signing_enabled: Boolean(digital_signing_enabled),
+        file_name: hasFilePayload ? normalizedFileName : null,
+      },
+    });
+
+    if (hasFilePayload) {
+      await logAudit({
+        actor: deriveActorFromRequest(req),
+        action: "Uploading .p12 to database",
+        entity: "HR Certificate",
+        entityId: hr_id,
+        metadata: {
+          file_name: normalizedFileName,
+          mime_type: mime_type || "application/x-pkcs12",
+        },
+      });
+    }
+
     return res.status(200).json({
       message: "Digital certificate settings saved",
       digitalCertificate: savedCertificate
@@ -890,6 +1059,18 @@ app.post("/api/document-audit", async (req, res) => {
 
   try {
     const result = await db.collection(mongoDocumentAuditCollection).insertOne(payload);
+
+    await logAudit({
+      actor: signed_by,
+      action: "Document Audit Stored",
+      entity: "Document",
+      entityId: document_id,
+      metadata: {
+        workflow_id,
+        signature_hash: signature_hash || null,
+      },
+    });
+
     return res.status(201).json({
       message: "Document audit stored",
       audit: {
@@ -929,6 +1110,16 @@ app.post('/sign', async (req, res) => {
       passphrase: process.env.CERT_PASSWORD,
     });
 
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "PDF Signed",
+      entity: "Document",
+      metadata: {
+        certificateType: "PKCS12",
+        pdfBytes: pdfBuffer.length,
+      },
+    });
+
     res.json({
       signedPdf: signedPdf.toString('base64'),
     });
@@ -938,6 +1129,51 @@ app.post('/sign', async (req, res) => {
       error: 'Failed to sign PDF',
       details: error.message,
     });
+  }
+});
+
+app.get("/api/employees", async (_req, res) => {
+  try {
+    const employees = await db
+      .collection(mongoEmployeesCollection)
+      .find({}, { sort: { _id: -1 } })
+      .toArray();
+
+    return res.status(200).json({
+      employees: employees.map((employee) => ({
+        id: employee._id.toString(),
+        ...employee,
+      })),
+    });
+  } catch (serverError) {
+    console.error("[GetEmployees] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch employees" });
+  }
+});
+
+app.get("/api/employees/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid employee id" });
+  }
+
+  try {
+    const employee = await db.collection(mongoEmployeesCollection).findOne({ _id: new ObjectId(id) });
+
+    if (!employee) {
+      return res.status(404).json({ error: "Employee not found" });
+    }
+
+    return res.status(200).json({
+      employee: {
+        id: employee._id.toString(),
+        ...employee,
+      },
+    });
+  } catch (serverError) {
+    console.error("[GetEmployeeById] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch employee" });
   }
 });
 
@@ -974,6 +1210,18 @@ app.post("/api/employees", async (req, res) => {
   try {
     const result = await db.collection(mongoEmployeesCollection).insertOne(payload);
 
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "Employee Created",
+      entity: "Employee",
+      entityId: result.insertedId.toString(),
+      metadata: {
+        full_name: payload.full_name,
+        department: payload.department,
+        role: payload.role,
+      },
+    });
+
     return res.status(201).json({
       message: "Employee added",
       employee: {
@@ -984,6 +1232,31 @@ app.post("/api/employees", async (req, res) => {
   } catch (serverError) {
     console.error("[AddEmployee] Mongo insert error:", serverError);
     return res.status(500).json({ error: "Unexpected backend error" });
+  }
+});
+
+app.get("/api/audit-logs", async (req, res) => {
+  const requestedLimit = Number(req.query.limit);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.min(requestedLimit, 200)
+    : 50;
+
+  try {
+    const logs = await db
+      .collection(mongoAuditLogsCollection)
+      .find(
+        {
+          action: { $in: Array.from(allowedAuditActions) },
+        },
+        { sort: { timestamp: -1 } },
+      )
+      .limit(limit)
+      .toArray();
+
+    return res.status(200).json(logs.map((log) => toApiAuditLog(log)));
+  } catch (serverError) {
+    console.error("[GetAuditLogs] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch audit logs" });
   }
 });
 
@@ -1010,6 +1283,7 @@ const startServer = async () => {
     console.log(`[Startup] Signatures collection: ${mongoSignaturesCollection}`);
     console.log(`[Startup] Digital certificates collection: ${mongoDigitalCertificatesCollection}`);
     console.log(`[Startup] Document audit collection: ${mongoDocumentAuditCollection}`);
+    console.log(`[Startup] Audit logs collection: ${mongoAuditLogsCollection}`);
     console.log(`[Startup] HR data collection: ${mongoHrDataCollection}`);
   });
 };

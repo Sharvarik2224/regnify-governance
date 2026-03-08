@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Shield, BarChart3, Brain, AlertTriangle, CheckCircle2, FileCheck, Users, Briefcase, User, Building2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -39,9 +39,6 @@ const LandingPage = () => {
             </div>
             <span className="text-lg font-bold text-foreground tracking-tight">REGNIFY</span>
           </div>
-          <Button variant="outline" size="sm" onClick={() => navigate("/auth?mode=login")}>
-            Login
-          </Button>
         </div>
       </nav>
 

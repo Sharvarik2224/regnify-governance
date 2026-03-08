@@ -1,12 +1,14 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Download, Plus, Users, AlertTriangle, CheckSquare, ShieldAlert, TrendingUp, AlertCircle, Eye, Clock } from "lucide-react";
+import { Download, Plus, Users, AlertTriangle, CheckSquare, AlertCircle, Eye, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
 const kpis = [
   { label: "Active Probation", value: "124", icon: Users, change: "+12% from last month", changeType: "positive" as const },
   { label: "High Risk", value: "12", icon: AlertTriangle, change: "Needs attention", changeType: "warning" as const },
   { label: "Pending Approvals", value: "8", icon: CheckSquare, change: "Avg response 4h", changeType: "neutral" as const },
-  { label: "Policy Violations", value: "3", icon: ShieldAlert, change: "Down 2 this week", changeType: "positive" as const },
 ];
 
 const employees = [
@@ -20,11 +22,22 @@ const alerts = [
   { title: "Policy Compliance Gap", desc: "Updated EU Data Protection policy needs acknowledgement by 48 departmental leads. 12 currently pending.", time: "2 HOURS AGO", severity: "MODERATE SEVERITY" },
 ];
 
-const auditItems = [
-  { title: "Access Level Escalated", desc: "Administrator role assigned to Sarah W. by HR_Admin", time: "14:22:15 UTC" },
-  { title: "Login Success", desc: "Employee Alice Johnson logged in from recognized IP: 192.168.1.45", time: "14:15:02 UTC" },
-  { title: "Policy Acknowledgement", desc: "Robert S. confirmed 'Workplace Harassment' policy update.", time: "13:58:30 UTC" },
-];
+type AuditLogRecord = {
+  id: string;
+  timestamp?: string;
+  action?: string;
+  entity?: string;
+  actor?: string;
+};
+
+const formatLogTime = (timestamp?: string) => {
+  if (!timestamp) {
+    return "-";
+  }
+
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
+};
 
 const riskBadge = (risk: string) => {
   const styles: Record<string, string> = {
@@ -36,7 +49,35 @@ const riskBadge = (risk: string) => {
   return `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold border ${styles[risk] || ""}`;
 };
 
-const HrDashboard = () => (
+const HrDashboard = () => {
+  const [recentLogs, setRecentLogs] = useState<AuditLogRecord[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(true);
+  const [logsError, setLogsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchRecentLogs = async () => {
+      setIsLoadingLogs(true);
+      setLogsError(null);
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/audit-logs?limit=3`);
+        if (!response.ok) {
+          throw new Error(`Unable to load recent audit activity. Status ${response.status}`);
+        }
+
+        const payload = await response.json();
+        setRecentLogs(Array.isArray(payload) ? payload.slice(0, 3) : []);
+      } catch (error) {
+        setLogsError(error instanceof Error ? error.message : "Unable to load recent audit activity");
+      } finally {
+        setIsLoadingLogs(false);
+      }
+    };
+
+    void fetchRecentLogs();
+  }, []);
+
+  return (
   <div className="space-y-6">
     {/* Header */}
     <div className="flex items-center justify-between">
@@ -51,7 +92,7 @@ const HrDashboard = () => (
     </div>
 
     {/* KPI Cards */}
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {kpis.map((k) => (
         <div key={k.label} className="rounded-lg border border-border bg-card p-5">
           <div className="flex items-center justify-between mb-3">
@@ -139,20 +180,29 @@ const HrDashboard = () => (
           <span className="rounded-full border border-border px-2.5 py-0.5 text-[10px] font-semibold text-muted-foreground uppercase">Live Feed</span>
         </div>
         <div className="p-5 space-y-4">
-          {auditItems.map((a, i) => (
-            <div key={i} className="flex gap-3">
-              <div className="mt-1.5 h-2 w-2 rounded-full bg-primary shrink-0" />
-              <div>
-                <h3 className="text-sm font-medium text-foreground">{a.title}</h3>
-                <p className="text-xs text-muted-foreground">{a.desc}</p>
-                <p className="mt-1 text-[10px] font-mono text-muted-foreground">{a.time}</p>
+          {isLoadingLogs ? (
+            <p className="text-sm text-muted-foreground">Loading recent audit activity...</p>
+          ) : logsError ? (
+            <p className="text-sm text-destructive">{logsError}</p>
+          ) : recentLogs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No recent logs available.</p>
+          ) : (
+            recentLogs.map((log) => (
+              <div key={log.id} className="flex gap-3">
+                <div className="mt-1.5 h-2 w-2 rounded-full bg-primary shrink-0" />
+                <div>
+                  <h3 className="text-sm font-medium text-foreground">{log.action || "Unknown Action"}</h3>
+                  <p className="text-xs text-muted-foreground">{`${log.entity || "Entity"} - ${log.actor || "System"}`}</p>
+                  <p className="mt-1 text-[10px] font-mono text-muted-foreground">{formatLogTime(log.timestamp)}</p>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export default HrDashboard;
