@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { governanceAlerts } from "@/data/managerMockData";
 
-const tabs = ["All Alerts", "High Severity", "Pending Review", "Archived"];
+const tabs = ["All Alerts", "Overdue", "Compliance", "Resolved"];
 
 const severityStyle = (severity: string) => {
   if (severity.includes("CRITICAL")) return "bg-destructive text-destructive-foreground";
@@ -13,10 +13,10 @@ const severityStyle = (severity: string) => {
 };
 
 const summaryCards = [
-  { label: "TOTAL ALERTS", value: "24" },
-  { label: "CRITICAL (RED)", value: "08", valueColor: "text-destructive" },
-  { label: "WARNING (AMBER)", value: "12", valueColor: "text-warning" },
-  { label: "RESOLVED", value: "04", valueColor: "text-success" },
+  { label: "TOTAL ALERTS", value: "06" },
+  { label: "OVERDUE", value: "03", valueColor: "text-destructive" },
+  { label: "COMPLIANCE", value: "02", valueColor: "text-warning" },
+  { label: "RESOLVED", value: "01", valueColor: "text-success" },
 ];
 
 const ManagerAlerts = () => {
@@ -24,9 +24,9 @@ const ManagerAlerts = () => {
 
   const filtered = governanceAlerts.filter((a) => {
     if (activeTab === "All Alerts") return true;
-    if (activeTab === "High Severity") return a.severity.includes("CRITICAL");
-    if (activeTab === "Pending Review") return a.severity.includes("WARNING");
-    if (activeTab === "Archived") return a.severity.includes("RESOLVED");
+    if (activeTab === "Overdue") return a.category === "Overdue";
+    if (activeTab === "Compliance") return a.category === "Compliance";
+    if (activeTab === "Resolved") return a.category === "Resolved";
     return true;
   });
 

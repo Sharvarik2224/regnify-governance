@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Lock, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+import { API_BASE_URL } from "@/lib/api";
 
 type AuditLogRecord = {
   id: string;

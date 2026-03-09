@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { API_BASE_URL } from "@/lib/api";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 const ADD_EMPLOYEE_ENDPOINT = `${API_BASE_URL}/api/employees`;
 const GET_EMPLOYEES_ENDPOINT = `${API_BASE_URL}/api/employees`;
 

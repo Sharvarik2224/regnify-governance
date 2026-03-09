@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { Search, UserPlus, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,7 +92,7 @@ const ManagerTeam = () => {
               <th className="px-5 py-3">Tasks</th>
               <th className="px-5 py-3">Risk Score</th>
               <th className="px-5 py-3">Status</th>
-              <th className="px-5 py-3">Action</th>
+              <th className="px-5 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -134,9 +133,10 @@ const ManagerTeam = () => {
                   </span>
                 </td>
                 <td className="px-5 py-4">
-                  <Link to={`/manager/employees/${m.id}`}>
-                    <Button variant="ghost" size="sm" className="text-primary text-xs font-semibold">View Details</Button>
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" className="text-xs font-semibold">Generate Report</Button>
+                    <Button size="sm" className="text-xs font-semibold">Send Warning</Button>
+                  </div>
                 </td>
               </tr>
             ))}

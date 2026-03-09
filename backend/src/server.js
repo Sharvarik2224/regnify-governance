@@ -28,6 +28,10 @@ const mongoDigitalCertificatesCollection = process.env.MONGODB_DIGITAL_CERTIFICA
 const mongoDocumentAuditCollection = process.env.MONGODB_DOCUMENT_AUDIT_COLLECTION || "document_audit";
 const mongoHrDataCollection = process.env.MONGODB_HR_DATA_COLLECTION || "hr_data";
 const mongoAuditLogsCollection = process.env.MONGODB_AUDIT_LOGS_COLLECTION || "audit_logs";
+const mongoTasksCollection = process.env.MONGODB_TASKS_COLLECTION || "Tasks";
+const mongoEmployeePerformanceCollection = process.env.MONGODB_EMPLOYEE_PERFORMANCE_COLLECTION || "Employee_performance";
+const mongoHrRequestsCollection = process.env.MONGODB_HR_REQUESTS_COLLECTION || "hr_requests";
+const n8nGenRequestWebhookUrl = process.env.N8N_GENREQ_WEBHOOK_URL || "https://regnify-2.app.n8n.cloud/webhook-test/genreq";
 const publicBaseUrl = process.env.PUBLIC_BASE_URL
 
 if (!mongoUri) {
@@ -53,6 +57,12 @@ const allowedAuditActions = new Set([
   "Digital Certificate Generated",
   "Uploading .p12 to database",
   "Profile Data Updated",
+  "Task Assigned",
+  "Task Submitted",
+  "Task Approved",
+  "Task Feedback Sent",
+  "Employee Performance Updated",
+  "HR Request Submitted",
 ]);
 
 const toApiAuditLog = (logDocument) => ({
@@ -231,6 +241,256 @@ app.post("/api/generate-certificate", async (req, res) => {
       error: "Unable to trigger certificate generation webhook",
       details: error instanceof Error ? error.message : "Unknown error",
     });
+  }
+});
+
+app.post("/api/hr-ai-generate-request", async (req, res) => {
+  const { subject, message, employee_name, employee_email } = req.body ?? {};
+
+  try {
+    const payload = {
+      subject: String(subject || "").trim(),
+      message: String(message || "").trim(),
+      employee_name: String(employee_name || "").trim(),
+      employee_email: String(employee_email || "").trim().toLowerCase(),
+      requested_at: new Date().toISOString(),
+    };
+
+    const webhookResponse = await fetch(n8nGenRequestWebhookUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const responseText = await webhookResponse.text();
+    let responsePayload;
+    try {
+      responsePayload = responseText ? JSON.parse(responseText) : { message: "Webhook triggered" };
+    } catch {
+      responsePayload = { message: responseText || "Webhook triggered" };
+    }
+
+    if (!webhookResponse.ok) {
+      return res.status(502).json({
+        error: "Unable to trigger AI generation webhook",
+        details: responsePayload,
+      });
+    }
+
+    return res.status(200).json({
+      message: "AI generation webhook triggered",
+      data: responsePayload,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Unable to trigger AI generation webhook",
+      details: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+app.post("/api/hr-requests", async (req, res) => {
+  const { subject, message, employee_name, employee_email, attachments } = req.body ?? {};
+
+  if (!subject || !message || !employee_email) {
+    return res.status(400).json({ error: "subject, message and employee_email are required" });
+  }
+
+  const normalizedAttachments = Array.isArray(attachments)
+    ? attachments
+        .map((file) => ({
+          name: String(file?.name || "").trim(),
+          mime_type: String(file?.mimeType || file?.mime_type || "application/octet-stream"),
+          size: Number(file?.size || 0),
+          file_data: file?.base64 ? new Binary(parseDataUrlToBuffer(String(file.base64))) : null,
+        }))
+        .filter((file) => file.name && file.file_data)
+    : [];
+
+  const payload = {
+    event_type: "employee_hr_request",
+    subject: String(subject).trim(),
+    message: String(message).trim(),
+    employee_name: String(employee_name || "").trim(),
+    employee_email: String(employee_email).trim().toLowerCase(),
+    attachments: normalizedAttachments,
+    feedback_notes: [],
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    const result = await db.collection(mongoHrRequestsCollection).insertOne(payload);
+
+    await logAudit({
+      actor: payload.employee_email,
+      action: "HR Request Submitted",
+      entity: "HR Request",
+      entityId: result.insertedId.toString(),
+      metadata: {
+        subject: payload.subject,
+        attachments: normalizedAttachments.length,
+      },
+    });
+
+    return res.status(201).json({
+      message: "HR request submitted",
+      request: {
+        id: result.insertedId.toString(),
+        subject: payload.subject,
+        message: payload.message,
+        employee_name: payload.employee_name,
+        employee_email: payload.employee_email,
+        attachments: normalizedAttachments.map((file) => ({
+          name: file.name,
+          mime_type: file.mime_type,
+          size: file.size,
+        })),
+        created_at: payload.created_at,
+      },
+    });
+  } catch (serverError) {
+    console.error("[CreateHrRequest] Mongo insert error:", serverError);
+    return res.status(500).json({ error: "Unable to submit HR request" });
+  }
+});
+
+app.get("/api/hr-requests", async (_req, res) => {
+  try {
+    const requests = await db
+      .collection(mongoHrRequestsCollection)
+      .find({ event_type: "employee_hr_request" }, { sort: { created_at: -1 }, projection: { "attachments.file_data": 0 } })
+      .toArray();
+
+    return res.status(200).json({
+      requests: requests.map((request) => ({
+        id: request._id.toString(),
+        subject: request.subject || "",
+        message: request.message || "",
+        employee_name: request.employee_name || "",
+        employee_email: request.employee_email || "",
+        created_at: request.created_at || null,
+        feedback_notes: Array.isArray(request.feedback_notes)
+          ? request.feedback_notes
+              .map((note) => ({
+                note: String(note?.note || "").trim(),
+                hr_name: String(note?.hr_name || "").trim(),
+                hr_email: String(note?.hr_email || "").trim(),
+                created_at: note?.created_at || null,
+              }))
+              .filter((note) => Boolean(note.note))
+          : [],
+        attachments: Array.isArray(request.attachments)
+          ? request.attachments.map((file, index) => ({
+              name: file.name || `Attachment ${index + 1}`,
+              mime_type: file.mime_type || "application/octet-stream",
+              size: Number(file.size || 0),
+              download_url: `${publicBaseUrl || "http://localhost:5000"}/api/hr-requests/${request._id.toString()}/attachments/${index}`,
+            }))
+          : [],
+      })),
+    });
+  } catch (serverError) {
+    console.error("[GetHrRequests] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch HR requests" });
+  }
+});
+
+app.post("/api/hr-requests/:id/feedback", async (req, res) => {
+  const { id } = req.params;
+  const { note, hr_name, hr_email } = req.body ?? {};
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid request id" });
+  }
+
+  const normalizedNote = String(note || "").trim();
+  if (!normalizedNote) {
+    return res.status(400).json({ error: "note is required" });
+  }
+
+  const feedbackEntry = {
+    note: normalizedNote,
+    hr_name: String(hr_name || "").trim(),
+    hr_email: String(hr_email || "").trim().toLowerCase(),
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    const result = await db.collection(mongoHrRequestsCollection).findOneAndUpdate(
+      { _id: new ObjectId(id), event_type: "employee_hr_request" },
+      {
+        $push: {
+          feedback_notes: feedbackEntry,
+        },
+      },
+      { returnDocument: "after" },
+    );
+
+    const updatedRequest = result?.value ?? result ?? null;
+    if (!updatedRequest) {
+      return res.status(404).json({ error: "HR request not found" });
+    }
+
+    await logAudit({
+      actor: feedbackEntry.hr_email || feedbackEntry.hr_name || deriveActorFromRequest(req),
+      action: "Task Feedback Sent",
+      entity: "HR Request",
+      entityId: id,
+      metadata: {
+        employee_email: updatedRequest.employee_email || "",
+        subject: updatedRequest.subject || "",
+      },
+    });
+
+    return res.status(200).json({
+      message: "HR feedback note saved",
+      feedback_note: feedbackEntry,
+    });
+  } catch (serverError) {
+    console.error("[AddHrRequestFeedback] Mongo update error:", serverError);
+    return res.status(500).json({ error: "Unable to save HR feedback note" });
+  }
+});
+
+app.get("/api/hr-requests/:id/attachments/:index", async (req, res) => {
+  const { id, index } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid request id" });
+  }
+
+  const attachmentIndex = Number(index);
+  if (!Number.isInteger(attachmentIndex) || attachmentIndex < 0) {
+    return res.status(400).json({ error: "Invalid attachment index" });
+  }
+
+  try {
+    const requestDoc = await db.collection(mongoHrRequestsCollection).findOne({ _id: new ObjectId(id) });
+
+    if (!requestDoc) {
+      return res.status(404).json({ error: "HR request not found" });
+    }
+
+    const attachment = Array.isArray(requestDoc.attachments) ? requestDoc.attachments[attachmentIndex] : null;
+    if (!attachment?.file_data) {
+      return res.status(404).json({ error: "Attachment not found" });
+    }
+
+    const fileData = attachment.file_data;
+    const fileBuffer = Buffer.isBuffer(fileData)
+      ? fileData
+      : fileData?.buffer
+        ? Buffer.from(fileData.buffer)
+        : Buffer.from(fileData);
+
+    res.setHeader("Content-Type", attachment.mime_type || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename=\"${attachment.name || "attachment"}\"`);
+    return res.status(200).send(fileBuffer);
+  } catch (serverError) {
+    console.error("[GetHrRequestAttachment] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch attachment" });
   }
 });
 
@@ -1235,6 +1495,488 @@ app.post("/api/employees", async (req, res) => {
   }
 });
 
+const mapTaskDocumentToApi = (taskDocument) => ({
+  id: taskDocument._id?.toString?.() || taskDocument.id,
+  title: taskDocument.title || "",
+  overview: taskDocument.overview || "",
+  assignedToEmployeeId: taskDocument.assigned_to_employee_id || "",
+  assignedToName: taskDocument.assigned_to_name || "",
+  assignedToRole: taskDocument.assigned_to_role || "",
+  assignedToEmail: taskDocument.assigned_to_email || "",
+  department: taskDocument.department || "",
+  category: taskDocument.category || "",
+  priority: taskDocument.priority || "Medium",
+  estimatedCompletionTime: taskDocument.estimated_completion_time || "",
+  deadline: taskDocument.deadline || null,
+  difficulty: taskDocument.difficulty || "Medium",
+  requiredSkills: Array.isArray(taskDocument.required_skills) ? taskDocument.required_skills : [],
+  attachments: Array.isArray(taskDocument.attachments) ? taskDocument.attachments : [],
+  acceptanceCriteria: Array.isArray(taskDocument.acceptance_criteria) ? taskDocument.acceptance_criteria : [],
+  reminderEnabled: Boolean(taskDocument.reminder_enabled),
+  reminderBefore: taskDocument.reminder_before || "",
+  status: taskDocument.status || "Pending",
+  managerStatus: taskDocument.manager_status || "Pending",
+  employeeStatus: taskDocument.employee_status || "pending",
+  progress: Number.isFinite(taskDocument.progress) ? taskDocument.progress : 0,
+  completedAt: taskDocument.completed_at || null,
+  submission:
+    taskDocument.submission ||
+    (taskDocument.submission_data
+      ? {
+          deployment_url: taskDocument.submission_data.deployed_link || "",
+          employee_comment: taskDocument.submission_data.comment || "",
+          files: taskDocument.submission_data.image?.name ? [taskDocument.submission_data.image.name] : [],
+          submitted_at: taskDocument.submission_data.submitted_at || null,
+        }
+      : {
+          deployment_url: "",
+          employee_comment: "",
+          files: [],
+          submitted_at: null,
+        }),
+  // Backward compatible field used by existing frontend components.
+  submissionData:
+    taskDocument.submission_data ||
+    (taskDocument.submission
+      ? {
+          comment: taskDocument.submission.employee_comment || "",
+          deployed_link: taskDocument.submission.deployment_url || "",
+          image: null,
+          submitted_at: taskDocument.submission.submitted_at || null,
+        }
+      : null),
+  managerFeedback: taskDocument.manager_feedback || null,
+  managerName: taskDocument.manager_name || "",
+  managerEmail: taskDocument.manager_email || "",
+  createdAt: taskDocument.created_at || null,
+  updatedAt: taskDocument.updated_at || null,
+});
+
+app.get("/api/tasks", async (req, res) => {
+  const assignedToEmployeeId = String(req.query.assignedToEmployeeId || "").trim();
+  const assignedToEmail = String(req.query.assignedToEmail || "").trim().toLowerCase();
+
+  const query = {};
+  if (assignedToEmployeeId) {
+    query.assigned_to_employee_id = assignedToEmployeeId;
+  }
+  if (assignedToEmail) {
+    query.assigned_to_email = assignedToEmail;
+  }
+
+  try {
+    const tasks = await db
+      .collection(mongoTasksCollection)
+      .find(query, { sort: { created_at: -1 } })
+      .toArray();
+
+    return res.status(200).json({
+      tasks: tasks.map(mapTaskDocumentToApi),
+    });
+  } catch (serverError) {
+    console.error("[GetTasks] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch tasks" });
+  }
+});
+
+app.get("/api/tasks/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid task id" });
+  }
+
+  try {
+    const task = await db.collection(mongoTasksCollection).findOne({ _id: new ObjectId(id) });
+
+    if (!task) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    return res.status(200).json({ task: mapTaskDocumentToApi(task) });
+  } catch (serverError) {
+    console.error("[GetTaskById] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch task" });
+  }
+});
+
+app.post("/api/tasks", async (req, res) => {
+  const {
+    title,
+    overview,
+    assignedToEmployeeId,
+    assignedToName,
+    assignedToRole,
+    assignedToEmail,
+    department,
+    category,
+    priority,
+    estimatedCompletionTime,
+    deadline,
+    difficulty,
+    requiredSkills,
+    attachments,
+    acceptanceCriteria,
+    reminderEnabled,
+    reminderBefore,
+    managerName,
+    managerEmail,
+  } = req.body ?? {};
+
+  if (!title || !overview || !assignedToEmployeeId || !assignedToName || !assignedToEmail || !category || !priority || !deadline || !difficulty) {
+    return res.status(400).json({
+      error: "title, overview, assignedToEmployeeId, assignedToName, assignedToEmail, category, priority, deadline and difficulty are required",
+    });
+  }
+
+  const payload = {
+    title: String(title).trim(),
+    overview: String(overview).trim(),
+    assigned_to_employee_id: String(assignedToEmployeeId),
+    assigned_to_name: String(assignedToName).trim(),
+    assigned_to_role: String(assignedToRole || "").trim(),
+    assigned_to_email: String(assignedToEmail || "").trim().toLowerCase(),
+    department: String(department || "").trim(),
+    category: String(category).trim(),
+    priority: String(priority).trim(),
+    estimated_completion_time: String(estimatedCompletionTime || "").trim(),
+    deadline: String(deadline),
+    difficulty: String(difficulty).trim(),
+    required_skills: Array.isArray(requiredSkills)
+      ? requiredSkills.map((skill) => String(skill).trim()).filter(Boolean)
+      : [],
+    attachments: Array.isArray(attachments)
+      ? attachments
+          .map((file) => ({
+            name: String(file?.name || "").trim(),
+            mimeType: String(file?.mimeType || "application/octet-stream"),
+            base64: String(file?.base64 || ""),
+            size: Number(file?.size || 0),
+          }))
+          .filter((file) => file.name && file.base64)
+      : [],
+    acceptance_criteria: Array.isArray(acceptanceCriteria)
+      ? acceptanceCriteria.map((criterion) => String(criterion).trim()).filter(Boolean)
+      : [],
+    reminder_enabled: Boolean(reminderEnabled),
+    reminder_before: reminderEnabled ? String(reminderBefore || "") : "",
+    status: "Pending",
+    manager_status: "Pending",
+    employee_status: "pending",
+    progress: 0,
+    submission: {
+      deployment_url: "",
+      employee_comment: "",
+      files: [],
+      submitted_at: null,
+    },
+    manager_name: String(managerName || "Manager"),
+    manager_email: String(managerEmail || "").trim().toLowerCase(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  try {
+    const result = await db.collection(mongoTasksCollection).insertOne(payload);
+
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "Task Assigned",
+      entity: "Task",
+      entityId: result.insertedId.toString(),
+      metadata: {
+        title: payload.title,
+        assigned_to: payload.assigned_to_name,
+        priority: payload.priority,
+        deadline: payload.deadline,
+      },
+    });
+
+    return res.status(201).json({
+      message: "Task assigned",
+      task: mapTaskDocumentToApi({ _id: result.insertedId, ...payload }),
+    });
+  } catch (serverError) {
+    console.error("[AssignTask] Mongo insert error:", serverError);
+    return res.status(500).json({ error: "Unable to assign task" });
+  }
+});
+
+const handleTaskSubmit = async (req, res) => {
+  const { id } = req.params;
+  const { comment, deployed_link, image_base64, image_name, image_mime_type, submitted_by_email } = req.body ?? {};
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid task id" });
+  }
+
+  if (!comment && !deployed_link && !image_base64) {
+    return res.status(400).json({ error: "At least one of comment, deployed_link or image_base64 is required" });
+  }
+
+  const submittedAt = new Date().toISOString();
+  const normalizedComment = String(comment || "").trim();
+  const normalizedDeployedLink = String(deployed_link || "").trim();
+  const normalizedImageName = String(image_name || "").trim();
+  const submissionData = {
+    comment: normalizedComment,
+    deployed_link: normalizedDeployedLink,
+    image: image_base64
+      ? {
+          name: normalizedImageName || "task-image",
+          mime_type: String(image_mime_type || "image/png"),
+          base64: String(image_base64),
+        }
+      : null,
+    submitted_by_email: String(submitted_by_email || "").trim().toLowerCase(),
+    submitted_at: submittedAt,
+  };
+
+  try {
+    const result = await db.collection(mongoTasksCollection).findOneAndUpdate(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          status: "completed",
+          employee_status: "completed",
+          manager_status: "In Progress",
+          progress: 100,
+          completed_at: submittedAt,
+          submission: {
+            deployment_url: normalizedDeployedLink,
+            employee_comment: normalizedComment,
+            files: normalizedImageName ? [normalizedImageName] : [],
+            submitted_at: submittedAt,
+          },
+          submission_data: submissionData,
+          updated_at: submittedAt,
+        },
+      },
+      { returnDocument: "after" },
+    );
+
+    const updatedTask = result?.value ?? result ?? null;
+    if (!updatedTask) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "Task Submitted",
+      entity: "Task",
+      entityId: id,
+      metadata: {
+        submitted_by_email: submissionData.submitted_by_email || null,
+        has_deployed_link: Boolean(submissionData.deployed_link),
+        has_image: Boolean(submissionData.image),
+      },
+    });
+
+    return res.status(200).json({
+      message: "Task submitted",
+      task: mapTaskDocumentToApi(updatedTask),
+    });
+  } catch (serverError) {
+    console.error("[SubmitTask] Mongo update error:", serverError);
+    return res.status(500).json({ error: "Unable to submit task" });
+  }
+};
+
+app.patch("/api/tasks/:id/submit", handleTaskSubmit);
+app.post("/api/tasks/:id/submit", handleTaskSubmit);
+
+const handleManagerReviewTask = async (req, res) => {
+  const { id } = req.params;
+  const { action, feedback_criteria, reviewer_email } = req.body ?? {};
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid task id" });
+  }
+
+  if (action !== "approve" && action !== "feedback") {
+    return res.status(400).json({ error: "action must be 'approve' or 'feedback'" });
+  }
+
+  if (action === "feedback" && !String(feedback_criteria || "").trim()) {
+    return res.status(400).json({ error: "feedback_criteria is required when action is 'feedback'" });
+  }
+
+  const reviewedAt = new Date().toISOString();
+  const nextUpdate =
+    action === "approve"
+      ? {
+          status: "Completed",
+          manager_status: "Completed",
+          progress: 100,
+          updated_at: reviewedAt,
+        }
+      : {
+          status: "In Progress",
+          manager_status: "In Progress",
+          manager_feedback: {
+            criteria: String(feedback_criteria || "").trim(),
+            reviewer_email: String(reviewer_email || "").trim().toLowerCase(),
+            reviewed_at: reviewedAt,
+          },
+          updated_at: reviewedAt,
+        };
+
+  try {
+    const result = await db.collection(mongoTasksCollection).findOneAndUpdate(
+      { _id: new ObjectId(id) },
+      { $set: nextUpdate },
+      { returnDocument: "after" },
+    );
+
+    const updatedTask = result?.value ?? result ?? null;
+    if (!updatedTask) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: action === "approve" ? "Task Approved" : "Task Feedback Sent",
+      entity: "Task",
+      entityId: id,
+      metadata: {
+        reviewer_email: String(reviewer_email || "").trim().toLowerCase() || null,
+      },
+    });
+
+    return res.status(200).json({
+      message: action === "approve" ? "Task approved" : "Feedback shared",
+      task: mapTaskDocumentToApi(updatedTask),
+    });
+  } catch (serverError) {
+    console.error("[ManagerReviewTask] Mongo update error:", serverError);
+    return res.status(500).json({ error: "Unable to process manager review" });
+  }
+};
+
+app.patch("/api/tasks/:id/manager-review", handleManagerReviewTask);
+app.post("/api/tasks/:id/manager-review", handleManagerReviewTask);
+
+const mapEmployeePerformanceToApi = (performanceDocument) => ({
+  id: performanceDocument._id?.toString?.() || performanceDocument.id,
+  employee_email: performanceDocument.employee_email || "",
+  completion_ratio: Number(performanceDocument.completion_ratio ?? 0),
+  avg_delay_days: Number(performanceDocument.avg_delay_days ?? 0),
+  attendance_percent: Number(performanceDocument.attendance_percent ?? 0),
+  escalation_count: Number(performanceDocument.escalation_count ?? 0),
+  warning_count: Number(performanceDocument.warning_count ?? 0),
+  manager_rating: Number(performanceDocument.manager_rating ?? 0),
+  performance_trend: Number(performanceDocument.performance_trend ?? 0),
+  task_consistency: Number(performanceDocument.task_consistency ?? 0),
+  created_at: performanceDocument.created_at || null,
+  updated_at: performanceDocument.updated_at || null,
+});
+
+app.get("/api/employee-performance", async (req, res) => {
+  const employeeEmail = String(req.query.employeeEmail || "").trim().toLowerCase();
+  const query = employeeEmail ? { employee_email: employeeEmail } : {};
+
+  try {
+    const records = await db
+      .collection(mongoEmployeePerformanceCollection)
+      .find(query, { sort: { updated_at: -1 } })
+      .toArray();
+
+    return res.status(200).json({
+      performance: records.map(mapEmployeePerformanceToApi),
+    });
+  } catch (serverError) {
+    console.error("[GetEmployeePerformance] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch employee performance data" });
+  }
+});
+
+app.get("/api/employee-performance/:employeeEmail", async (req, res) => {
+  const employeeEmail = String(req.params.employeeEmail || "").trim().toLowerCase();
+
+  if (!employeeEmail) {
+    return res.status(400).json({ error: "employeeEmail is required" });
+  }
+
+  try {
+    const record = await db.collection(mongoEmployeePerformanceCollection).findOne({ employee_email: employeeEmail });
+
+    if (!record) {
+      return res.status(404).json({ error: "Employee performance record not found" });
+    }
+
+    return res.status(200).json({
+      performance: mapEmployeePerformanceToApi(record),
+    });
+  } catch (serverError) {
+    console.error("[GetEmployeePerformanceByEmail] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch employee performance data" });
+  }
+});
+
+app.post("/api/employee-performance", async (req, res) => {
+  const {
+    employee_email,
+    completion_ratio,
+    avg_delay_days,
+    attendance_percent,
+    escalation_count,
+    warning_count,
+    manager_rating,
+    performance_trend,
+    task_consistency,
+  } = req.body ?? {};
+
+  const normalizedEmployeeEmail = String(employee_email || "").trim().toLowerCase();
+
+  if (!normalizedEmployeeEmail) {
+    return res.status(400).json({ error: "employee_email is required" });
+  }
+
+  const payload = {
+    employee_email: normalizedEmployeeEmail,
+    completion_ratio: Number(completion_ratio ?? 0),
+    avg_delay_days: Number(avg_delay_days ?? 0),
+    attendance_percent: Number(attendance_percent ?? 0),
+    escalation_count: Number(escalation_count ?? 0),
+    warning_count: Number(warning_count ?? 0),
+    manager_rating: Number(manager_rating ?? 0),
+    performance_trend: Number(performance_trend ?? 0),
+    task_consistency: Number(task_consistency ?? 0),
+    updated_at: new Date().toISOString(),
+  };
+
+  try {
+    await db.collection(mongoEmployeePerformanceCollection).updateOne(
+      { employee_email: normalizedEmployeeEmail },
+      {
+        $set: payload,
+        $setOnInsert: { created_at: new Date().toISOString() },
+      },
+      { upsert: true },
+    );
+
+    const savedRecord = await db.collection(mongoEmployeePerformanceCollection).findOne({ employee_email: normalizedEmployeeEmail });
+
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "Employee Performance Updated",
+      entity: "Employee Performance",
+      entityId: normalizedEmployeeEmail,
+      metadata: {
+        employee_email: normalizedEmployeeEmail,
+      },
+    });
+
+    return res.status(200).json({
+      message: "Employee performance saved",
+      performance: savedRecord ? mapEmployeePerformanceToApi(savedRecord) : null,
+    });
+  } catch (serverError) {
+    console.error("[UpsertEmployeePerformance] Mongo upsert error:", serverError);
+    return res.status(500).json({ error: "Unable to save employee performance" });
+  }
+});
+
 app.get("/api/audit-logs", async (req, res) => {
   const requestedLimit = Number(req.query.limit);
   const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
@@ -1285,6 +2027,8 @@ const startServer = async () => {
     console.log(`[Startup] Document audit collection: ${mongoDocumentAuditCollection}`);
     console.log(`[Startup] Audit logs collection: ${mongoAuditLogsCollection}`);
     console.log(`[Startup] HR data collection: ${mongoHrDataCollection}`);
+    console.log(`[Startup] Tasks collection: ${mongoTasksCollection}`);
+    console.log(`[Startup] Employee performance collection: ${mongoEmployeePerformanceCollection}`);
   });
 };
 

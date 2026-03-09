@@ -3,10 +3,9 @@ import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, Download, AlertTriangle, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { API_BASE_URL } from "@/lib/api";
 
 const tabs = ["Overview", "Performance", "AI Evaluation"];
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
 type EmployeeRecord = {
   id: string;

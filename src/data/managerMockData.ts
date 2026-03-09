@@ -41,6 +41,7 @@ export interface ManagerApproval {
 export interface GovernanceAlert {
   id: string;
   severity: "CRITICAL - RED" | "WARNING - AMBER" | "RESOLVED";
+  category: "Overdue" | "Compliance" | "Resolved";
   title: string;
   description: string;
   timestamp: string;
@@ -72,16 +73,17 @@ export const managerApprovals: ManagerApproval[] = [
 ];
 
 export const governanceAlerts: GovernanceAlert[] = [
-  { id: "g1", severity: "CRITICAL - RED", title: "AI Conflict Flag: Algorithmic Bias detected", description: "High risk discrepancy found in automated evaluation module. The algorithm shows statistically significant deviation from equal opportunity thresholds in Department 2A (Tech Services).", timestamp: "24 MINUTES AGO" },
-  { id: "g2", severity: "WARNING - AMBER", title: "Performance Drop: Department 4B", description: "Productivity metrics fell 18% below the regulatory threshold for the third consecutive week. This triggers a mandatory governance review of operational protocols.", timestamp: "2 HOURS AGO" },
-  { id: "g3", severity: "CRITICAL - RED", title: "Missed Deadlines: Quarterly Compliance Filing", description: "The regulatory filing for Q3 Transparency Disclosure has not been submitted. Immediate action required to avoid statutory penalties and audit failure.", timestamp: "4 HOURS AGO" },
-  { id: "g4", severity: "WARNING - AMBER", title: "Anomalous Low Attendance: Remote Cluster B", description: "Daily check-in data shows a 35% drop in connectivity for the Remote Cluster B. Potential infrastructure failure or systemic disengagement detected.", timestamp: "6 HOURS AGO" },
-  { id: "g5", severity: "RESOLVED", title: "Data Export Audit Completed", description: "System detected data export review completed. All entries verified against compliance framework.", timestamp: "1 DAY AGO" },
+  { id: "g1", severity: "CRITICAL - RED", category: "Overdue", title: "Rahul Sharma - Task Deadline Missed", description: "API documentation task missed its committed deadline by 2 days. Manager action is required for escalation or reassignment.", timestamp: "24 MINUTES AGO" },
+  { id: "g2", severity: "CRITICAL - RED", category: "Overdue", title: "Rahul Sharma - 3 Tasks Overdue", description: "Three assigned tasks remain incomplete past due date. Governance intervention recommended to prevent further slippage.", timestamp: "2 HOURS AGO" },
+  { id: "g3", severity: "WARNING - AMBER", category: "Overdue", title: "Neha Singh - Pending Approval Blocking Delivery", description: "Code review and manager sign-off are pending for 2 completed tasks, causing delivery delay and timeline risk.", timestamp: "4 HOURS AGO" },
+  { id: "g4", severity: "WARNING - AMBER", category: "Compliance", title: "Arjun Patil - Incomplete Compliance Forms", description: "NDA renewal and security awareness acknowledgement are pending. Employee remains non-compliant until submission.", timestamp: "6 HOURS AGO" },
+  { id: "g5", severity: "WARNING - AMBER", category: "Compliance", title: "Casey Chen - Low Productivity Alert", description: "Task completion dropped below 50% over the current sprint window. Monitor performance and assign corrective plan.", timestamp: "8 HOURS AGO" },
+  { id: "g6", severity: "RESOLVED", category: "Resolved", title: "Neha Singh - Compliance Forms Submitted", description: "Mandatory policy documents were submitted and verified. Compliance status has been updated to good standing.", timestamp: "1 DAY AGO" },
 ];
 
 export const dashboardAlerts = [
-  { severity: "HIGH SEVERITY" as const, title: "Performance Decline", description: "Casey Chen's task completion dropped 15% below threshold in the last 48 hours.", timestamp: "10M AGO" },
-  { severity: "MEDIUM" as const, title: "Low Attendance", description: "Jordan Smith recorded consecutive late arrivals (3 days). Impacting SLA readiness.", timestamp: "2H AGO" },
-  { severity: "ADVISORY" as const, title: "Evaluation Window", description: "Mid-probation review for Alex Rivera is now open for manager input.", timestamp: "4H AGO" },
-  { severity: "CONFLICT" as const, title: "Task Dependency Issue", description: "Cross-departmental task conflict flagged between Engineering and Finance modules.", timestamp: "6H AGO" },
+  { severity: "HIGH SEVERITY" as const, title: "Rahul Sharma - 3 Tasks Overdue", description: "Three tasks are pending past due date and now require immediate manager action.", timestamp: "10M AGO" },
+  { severity: "MEDIUM" as const, title: "Casey Chen - Low Productivity", description: "Current completion rate is 48% this sprint, below governance threshold.", timestamp: "2H AGO" },
+  { severity: "ADVISORY" as const, title: "Arjun Patil - Pending Approvals", description: "Two submissions are awaiting manager approval and are blocking closure.", timestamp: "4H AGO" },
+  { severity: "MEDIUM" as const, title: "Rahul Sharma - Incomplete Compliance Forms", description: "Security training acknowledgement is still pending and needs follow-up.", timestamp: "6H AGO" },
 ];

@@ -10,6 +10,7 @@ import {
   updateProfile,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { API_BASE_URL } from "@/lib/api";
 
 export type UserRole = "hr" | "manager" | "employee" | "site-head";
 
@@ -46,9 +47,6 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-
-  const API_BASE_URL =
-    (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000").trim();
 
   const isUserRole = (role: string): role is UserRole => {
     return role === "hr" || role === "manager" || role === "employee" || role === "site-head";

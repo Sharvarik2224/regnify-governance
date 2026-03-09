@@ -15,6 +15,7 @@ const mongoDigitalCertificatesCollection = process.env.MONGODB_DIGITAL_CERTIFICA
 const mongoDocumentAuditCollection = process.env.MONGODB_DOCUMENT_AUDIT_COLLECTION || "document_audit";
 const mongoHrDataCollection = process.env.MONGODB_HR_DATA_COLLECTION || "hr_data";
 const mongoAuditLogsCollection = process.env.MONGODB_AUDIT_LOGS_COLLECTION || "audit_logs";
+const mongoEmployeePerformanceCollection = process.env.MONGODB_EMPLOYEE_PERFORMANCE_COLLECTION || "Employee_performance";
 
 if (!mongoUri) {
   throw new Error("MONGODB_URI is required.");
@@ -28,6 +29,7 @@ const run = async () => {
 
   await db.collection(mongoEmployeesCollection).createIndex({ email: 1 }, { sparse: true });
   await db.collection(mongoHrDataCollection).createIndex({ hr_id: 1 }, { unique: true });
+  await db.collection(mongoEmployeePerformanceCollection).createIndex({ employee_email: 1 }, { unique: true });
 
   await db.collection(mongoSignaturesCollection).createIndex({ hr_id: 1, uploaded_at: -1 });
   await db.collection(mongoSignaturesCollection).createIndex({ hr_id: 1, status: 1, uploaded_at: -1 });

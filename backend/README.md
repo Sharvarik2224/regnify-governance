@@ -21,6 +21,7 @@ cp .env.example .env
 - `MONGODB_EMPLOYEES_COLLECTION`: Collection name (default: `employees`)
 - `MONGODB_SIGNATURES_COLLECTION`: Collection name (default: `signatures`)
 - `MONGODB_DOCUMENT_AUDIT_COLLECTION`: Collection name (default: `document_audit`)
+- `MONGODB_EMPLOYEE_PERFORMANCE_COLLECTION`: Collection name (default: `Employee_performance`)
 - `PUBLIC_BASE_URL`: Public URL for signature file links (default: `http://localhost:5000`)
 - `PORT`: Backend port (default: `5000`)
 
@@ -43,6 +44,9 @@ npm run dev
 API endpoint for frontend:
 
 - `POST /api/employees`
+- `GET /api/employee-performance`
+- `GET /api/employee-performance/:employeeEmail`
+- `POST /api/employee-performance`
 - `GET /api/signatures/:hrId`
 - `POST /api/signatures/upload`
 - `POST /api/signatures/revoke`
