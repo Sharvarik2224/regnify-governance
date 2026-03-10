@@ -20,6 +20,26 @@ If you want to work locally using your own IDE, you can clone this repo and push
 
 The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
 
+## Backend setup (Express + MongoDB)
+
+The backend is in [backend/README.md](backend/README.md).
+
+Quick start:
+
+```sh
+# in project root
+cd backend
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Then run frontend from the root:
+
+```sh
+npm run dev
+```
+
 Follow these steps:
 
 ```sh

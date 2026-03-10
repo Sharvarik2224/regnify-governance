@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Shield, BarChart3, Brain, AlertTriangle, CheckCircle2, FileCheck, Users, Briefcase, User, Building2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -39,9 +39,6 @@ const LandingPage = () => {
             </div>
             <span className="text-lg font-bold text-foreground tracking-tight">REGNIFY</span>
           </div>
-          <Button variant="outline" size="sm" onClick={() => navigate("/auth")}>
-            Login
-          </Button>
         </div>
       </nav>
 
@@ -136,7 +133,7 @@ const LandingPage = () => {
             {roles.map((r) => (
               <button
                 key={r.id}
-                onClick={() => navigate(`/auth?role=${r.id}`)}
+                onClick={() => navigate(`/auth?role=${r.id}&mode=signup`)}
                 className="group rounded-lg border border-border bg-card p-6 text-left hover:border-primary hover:shadow-md transition-all"
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-accent group-hover:bg-primary/10 transition-colors">
