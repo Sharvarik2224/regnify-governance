@@ -1,5 +1,5 @@
 import { Link, useLocation, Outlet, useNavigate } from "react-router-dom";
-import { Shield, LayoutDashboard, Users, CheckSquare, AlertTriangle, Settings, Search, Bell, LogOut, ClipboardList } from "lucide-react";
+import { Shield, LayoutDashboard, Users, FileText, Settings, Search, Bell, LogOut, ClipboardList } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -8,8 +8,7 @@ const menuItems = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/manager/dashboard" },
   { label: "My Team", icon: Users, path: "/manager/team" },
   { label: "Tasks", icon: ClipboardList, path: "/manager/tasks" },
-  { label: "Approvals", icon: CheckSquare, path: "/manager/approvals" },
-  { label: "Governance Alerts", icon: AlertTriangle, path: "/manager/alerts" },
+  { label: "Audit and Task Logs", icon: FileText, path: "/manager/alerts" },
 ];
 
 const ManagerLayout = () => {

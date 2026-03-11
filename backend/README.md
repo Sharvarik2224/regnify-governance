@@ -19,6 +19,8 @@ cp .env.example .env
 - `MONGODB_URI`: MongoDB connection string
 - `MONGODB_DB_NAME`: Database name (default: `regnify_hr`)
 - `MONGODB_EMPLOYEES_COLLECTION`: Collection name (default: `employees`)
+- `MONGODB_METRICS_ONE_COLLECTION`: Primary metrics collection name (default: `metrics_one`)
+- `MONGODB_METRICS_LEGACY_COLLECTION`: Legacy/Atlas metrics collection name (default: `metrics_1`)
 - `MONGODB_SIGNATURES_COLLECTION`: Collection name (default: `signatures`)
 - `MONGODB_DOCUMENT_AUDIT_COLLECTION`: Collection name (default: `document_audit`)
 - `MONGODB_EMPLOYEE_PERFORMANCE_COLLECTION`: Collection name (default: `Employee_performance`)

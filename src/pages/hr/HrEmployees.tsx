@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { API_BASE_URL } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 const ADD_EMPLOYEE_ENDPOINT = `${API_BASE_URL}/api/employees`;
 const GET_EMPLOYEES_ENDPOINT = `${API_BASE_URL}/api/employees`;
@@ -46,6 +47,7 @@ const initialFormState: AddEmployeeForm = {
 };
 
 const HrEmployees = () => {
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [employees, setEmployees] = useState<EmployeeRecord[]>([]);
@@ -54,6 +56,7 @@ const HrEmployees = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [provisioningId, setProvisioningId] = useState<string | null>(null);
   const [employeeForm, setEmployeeForm] = useState<AddEmployeeForm>(initialFormState);
 
   const fetchEmployees = async () => {
@@ -108,6 +111,35 @@ const HrEmployees = () => {
 
   const updateField = (field: keyof AddEmployeeForm, value: string) => {
     setEmployeeForm((previous) => ({ ...previous, [field]: value }));
+  };
+
+  const handleSendCredentials = async (employeeId: string, employeeName: string) => {
+    setProvisioningId(employeeId);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/hr/provision-employee`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employee_id: employeeId }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || `Failed with status ${response.status}`);
+      }
+
+      toast({
+        title: "Workflow triggered",
+        description: `Credential email workflow started for ${employeeName}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Failed to send credentials",
+        description: error instanceof Error ? error.message : "Unable to provision account",
+        variant: "destructive",
+      });
+    } finally {
+      setProvisioningId(null);
+    }
   };
 
   const handleAddEmployee = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -303,6 +335,7 @@ const HrEmployees = () => {
               <th className="px-5 py-3">Manager</th>
               <th className="px-5 py-3">Probation Period</th>
               <th className="px-5 py-3">Date Of Joining</th>
+              <th className="px-5 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -316,7 +349,7 @@ const HrEmployees = () => {
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td className="px-5 py-6 text-sm text-muted-foreground" colSpan={8}>No employees found.</td>
+                <td className="px-5 py-6 text-sm text-muted-foreground" colSpan={9}>No employees found.</td>
               </tr>
             ) : (
               filtered.map((emp) => (
@@ -333,6 +366,18 @@ const HrEmployees = () => {
                   <td className="px-5 py-4 text-sm text-muted-foreground">{emp.manager_assigned || "-"}</td>
                   <td className="px-5 py-4 text-sm text-muted-foreground">{emp.probation_period || "-"}</td>
                   <td className="px-5 py-4 text-sm text-foreground">{emp.date_of_joining || "-"}</td>
+                  <td className="px-5 py-4">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs gap-1"
+                      disabled={provisioningId === emp.id}
+                      onClick={() => handleSendCredentials(emp.id, emp.full_name || emp.email || "Employee")}
+                    >
+                      <Mail className="h-3 w-3" />
+                      {provisioningId === emp.id ? "Sending..." : "Send Credentials"}
+                    </Button>
+                  </td>
                 </tr>
               ))
             )}

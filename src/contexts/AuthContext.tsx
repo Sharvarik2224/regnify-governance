@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, ReactNode } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   sendEmailVerification,
   getMultiFactorResolver,
   PhoneAuthProvider,
@@ -22,6 +23,7 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
+  isLoading: boolean;
   login: (
     email: string,
     password: string,
@@ -31,6 +33,10 @@ interface AuthContextType {
     name: string,
     email: string,
     password: string,
+    requestedRole?: UserRole
+  ) => Promise<void>;
+  forgotPassword: (
+    email: string,
     requestedRole?: UserRole
   ) => Promise<void>;
   logout: () => void;
@@ -47,6 +53,38 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [contextReady, setContextReady] = useState(false);
+
+  // Restore auth session on app mount
+  useEffect(() => {
+    const restoreSession = () => {
+      try {
+        const storedSession = localStorage.getItem("regnify_auth_session");
+        if (storedSession) {
+          const session = JSON.parse(storedSession);
+          const { user: storedUser } = session;
+          
+          // Restore the user state from localStorage
+          if (storedUser && typeof storedUser === "object") {
+            setUser(storedUser);
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to restore auth session", error);
+        try {
+          localStorage.removeItem("regnify_auth_session");
+        } catch (e) {
+          console.warn("Failed to clear auth session from storage", e);
+        }
+      } finally {
+        setIsLoading(false);
+        setContextReady(true);
+      }
+    };
+
+    restoreSession();
+  }, []);
 
   const isUserRole = (role: string): role is UserRole => {
     return role === "hr" || role === "manager" || role === "employee" || role === "site-head";
@@ -211,13 +249,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const resolvedRole = role;
 
-    setUser({
+    const userData: User = {
       name:
         firebaseUser.displayName ||
         email.split("@")[0],
       email,
       role: resolvedRole,
-    });
+    };
+
+    setUser(userData);
+
+    // Persist auth session to localStorage
+    try {
+      localStorage.setItem("regnify_auth_session", JSON.stringify({
+        user: userData,
+        timestamp: new Date().toISOString(),
+      }));
+    } catch (error) {
+      console.warn("Failed to persist auth session", error);
+    }
 
     return resolvedRole;
   };
@@ -249,6 +299,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
   };
 
+  const forgotPassword = async (
+    email: string,
+    requestedRole?: UserRole,
+  ): Promise<void> => {
+    const normalizedEmail = String(email || "").trim();
+    if (!normalizedEmail) {
+      throw new Error("Please enter your HR email first.");
+    }
+
+    if (requestedRole && requestedRole !== "hr") {
+      throw new Error("Forgot password is enabled only for HR login.");
+    }
+
+    await sendPasswordResetEmail(auth, normalizedEmail);
+  };
+
   const logout = async () => {
     const firebaseUser = auth.currentUser;
 
@@ -273,14 +339,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     await auth.signOut();
     setUser(null);
+
+    // Clear persisted auth session
+    try {
+      localStorage.removeItem("regnify_auth_session");
+    } catch (error) {
+      console.warn("Failed to clear auth session from storage", error);
+    }
   };
 
   return (
     <AuthContext.Provider
       value={{
         user,
+        isLoading,
         login,
         signup,
+        forgotPassword,
         logout,
         isAuthenticated: !!user,
       }}

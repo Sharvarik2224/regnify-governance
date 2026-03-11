@@ -11,7 +11,6 @@ import HrLayout from "./components/layout/HrLayout";
 import HrDashboard from "./pages/hr/HrDashboard";
 import HrEmployees from "./pages/hr/HrEmployees";
 import EmployeeDetail from "./pages/hr/EmployeeDetail";
-import HrApprovals from "./pages/hr/HrApprovals";
 import GovernanceAlerts from "./pages/hr/GovernanceAlerts";
 import AuditLogs from "./pages/hr/AuditLogs";
 import HrSettings from "./pages/hr/HrSettings";
@@ -21,7 +20,6 @@ import ManagerTeam from "./pages/manager/ManagerTeam";
 import ManagerTasks from "./pages/manager/ManagerTasks";
 import ManagerTaskNew from "./pages/manager/ManagerTaskNew";
 import ManagerEmployeeDetail from "./pages/manager/ManagerEmployeeDetail";
-import ManagerApprovals from "./pages/manager/ManagerApprovals";
 import ManagerAlerts from "./pages/manager/ManagerAlerts";
 import EmployeeLayout from "./components/layout/EmployeeLayout";
 import EmployeeDashboard from "./pages/employee/EmployeeDashboard";
@@ -30,7 +28,6 @@ import TaskDetail from "./pages/employee/TaskDetail";
 import Communication from "./pages/employee/Communication";
 import HRUpdates from "./pages/employee/HRUpdates";
 import PerformanceOverview from "./pages/employee/PerformanceOverview";
-import Attendance from "./pages/employee/Attendance";
 import Profile from "./pages/employee/Profile";
 import SiteHeadLayout from "./components/layout/SiteHeadLayout";
 import ExecutiveDashboard from "./pages/sitehead/ExecutiveDashboard";
@@ -39,7 +36,6 @@ import EmployeeReview from "./pages/sitehead/EmployeeReview";
 import PerformanceAnalytics from "./pages/sitehead/PerformanceAnalytics";
 import ApprovalHistory from "./pages/sitehead/ApprovalHistory";
 import SiteInsights from "./pages/sitehead/SiteInsights";
-import SiteHeadAuditLogs from "./pages/sitehead/SiteHeadAuditLogs";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -60,7 +56,6 @@ const App = () => (
               <Route path="dashboard" element={<HrDashboard />} />
               <Route path="employees" element={<HrEmployees />} />
               <Route path="employees/:id" element={<EmployeeDetail />} />
-              <Route path="approvals" element={<HrApprovals />} />
               <Route path="governance-alerts" element={<GovernanceAlerts />} />
               <Route path="audit-logs" element={<AuditLogs />} />
               <Route path="settings" element={<HrSettings />} />
@@ -74,7 +69,6 @@ const App = () => (
               <Route path="tasks" element={<ManagerTasks />} />
               <Route path="tasks/new" element={<ManagerTaskNew />} />
               <Route path="employees/:id" element={<ManagerEmployeeDetail />} />
-              <Route path="approvals" element={<ManagerApprovals />} />
               <Route path="alerts" element={<ManagerAlerts />} />
             </Route>
 
@@ -87,7 +81,6 @@ const App = () => (
               <Route path="communication" element={<Communication />} />
               <Route path="hr-updates" element={<HRUpdates />} />
               <Route path="performance" element={<PerformanceOverview />} />
-              <Route path="attendance" element={<Attendance />} />
               <Route path="profile" element={<Profile />} />
             </Route>
 
@@ -100,7 +93,7 @@ const App = () => (
               <Route path="analytics" element={<PerformanceAnalytics />} />
               <Route path="history" element={<ApprovalHistory />} />
               <Route path="insights" element={<SiteInsights />} />
-              <Route path="audit" element={<SiteHeadAuditLogs />} />
+              <Route path="audit" element={<AuditLogs />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import admin from "firebase-admin";
 import { Binary, MongoClient, ObjectId } from "mongodb";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -10,6 +9,7 @@ import { SignPdf } from 'node-signpdf';
 const signer = new SignPdf();
 import { plainAddPlaceholder } from 'node-signpdf/dist/helpers/index.js';
 import createAuthRoutes from "./routes/auth.routes.js";
+import getFirebaseAdmin from "./config/firebaseAdmin.js";
 import { cleanupGeneratedCertificate, generateCertificate } from "./generateCert.js";
 dotenv.config();
 
@@ -29,10 +29,23 @@ const mongoDocumentAuditCollection = process.env.MONGODB_DOCUMENT_AUDIT_COLLECTI
 const mongoHrDataCollection = process.env.MONGODB_HR_DATA_COLLECTION || "hr_data";
 const mongoAuditLogsCollection = process.env.MONGODB_AUDIT_LOGS_COLLECTION || "audit_logs";
 const mongoTasksCollection = process.env.MONGODB_TASKS_COLLECTION || "Tasks";
+const mongoTeamsCollection = process.env.MONGODB_TEAMS_COLLECTION || "teams";
+const mongoMetricsOneCollection = process.env.MONGODB_METRICS_ONE_COLLECTION || "metrics_one";
+const mongoMetricsLegacyCollection = process.env.MONGODB_METRICS_LEGACY_COLLECTION || "metrics_1";
 const mongoEmployeePerformanceCollection = process.env.MONGODB_EMPLOYEE_PERFORMANCE_COLLECTION || "Employee_performance";
 const mongoHrRequestsCollection = process.env.MONGODB_HR_REQUESTS_COLLECTION || "hr_requests";
+const mongoUsersCollection = process.env.MONGODB_USERS_COLLECTION || "users";
+const mongoComplainsCollection = process.env.MONGODB_COMPLAINS_COLLECTION || "complains";
 const n8nGenRequestWebhookUrl = process.env.N8N_GENREQ_WEBHOOK_URL || "https://regnify-2.app.n8n.cloud/webhook-test/genreq";
+const n8nSendPassWebhookUrl = process.env.N8N_SENDPASS_WEBHOOK_URL || "https://regnify-2.app.n8n.cloud/webhook-test/sendpass";
+const n8nSendPassWebhookSecret = process.env.N8N_SENDPASS_WEBHOOK_SECRET || "";
+const n8nServiceToken = process.env.N8N_SERVICE_TOKEN || "";
 const publicBaseUrl = process.env.PUBLIC_BASE_URL
+
+const generatePasscode = () => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  return Array.from({ length: 10 }, () => chars[crypto.randomInt(0, chars.length)]).join("");
+};
 
 if (!mongoUri) {
   throw new Error("MONGODB_URI is required.");
@@ -63,6 +76,13 @@ const allowedAuditActions = new Set([
   "Task Feedback Sent",
   "Employee Performance Updated",
   "HR Request Submitted",
+  "Digital Certificate Downloaded",
+  "PDF Signed",
+  "Manager Onboard Member",
+  "Manager Report Generated",
+  "Team Created",
+  "Team Task Assigned",
+  "Manager Warning Submitted",
 ]);
 
 const toApiAuditLog = (logDocument) => ({
@@ -122,6 +142,344 @@ const logAudit = async ({ actor, action, entity, entityId = null, metadata = {} 
   }
 };
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const roundTo = (value, digits = 4) => {
+  const factor = 10 ** digits;
+  return Math.round((Number(value) + Number.EPSILON) * factor) / factor;
+};
+
+const safeDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const isTaskCompleted = (task) => {
+  const status = String(task?.status || "").toLowerCase();
+  const managerStatus = String(task?.manager_status || "").toLowerCase();
+  return status === "completed" || managerStatus === "completed";
+};
+
+const getTaskCompletedAt = (task) => {
+  return (
+    task?.completed_at ||
+    task?.submission?.submitted_at ||
+    task?.submission_data?.submitted_at ||
+    null
+  );
+};
+
+const getTaskActivityAt = (task) => {
+  return (
+    task?.completed_at ||
+    task?.manager_feedback?.reviewed_at ||
+    task?.submission?.submitted_at ||
+    task?.submission_data?.submitted_at ||
+    task?.updated_at ||
+    task?.created_at ||
+    null
+  );
+};
+
+const computeEmployeeMetrics = (employeeEmail, tasks, openComplaintCount = 0) => {
+  const now = new Date();
+  const assignedTasks = Array.isArray(tasks) ? tasks : [];
+  const completedTasks = assignedTasks.filter((task) => isTaskCompleted(task));
+
+  const assignedCount = assignedTasks.length;
+  const completedCount = completedTasks.length;
+  const completionRatio = assignedCount > 0 ? completedCount / assignedCount : 0;
+
+  const delayDays = assignedTasks
+    .map((task) => {
+      const deadline = safeDate(task?.deadline);
+      if (!deadline) {
+        return null;
+      }
+
+      const endDate = isTaskCompleted(task)
+        ? safeDate(getTaskCompletedAt(task))
+        : now;
+
+      if (!endDate) {
+        return null;
+      }
+
+      return Math.max(0, (endDate.getTime() - deadline.getTime()) / MS_PER_DAY);
+    })
+    .filter((value) => Number.isFinite(value));
+
+  const avgDelayDays = delayDays.length > 0
+    ? delayDays.reduce((sum, value) => sum + value, 0) / delayDays.length
+    : 0;
+
+  const overdueOpenTasks = assignedTasks.filter((task) => {
+    if (isTaskCompleted(task)) {
+      return false;
+    }
+
+    const deadline = safeDate(task?.deadline);
+    return Boolean(deadline && deadline.getTime() < now.getTime());
+  }).length;
+
+  const onTimeCompletedTasks = completedTasks.filter((task) => {
+    const completedAt = safeDate(getTaskCompletedAt(task));
+    const deadline = safeDate(task?.deadline);
+    if (!completedAt || !deadline) {
+      return false;
+    }
+    return completedAt.getTime() <= deadline.getTime();
+  }).length;
+
+  const highPriorityOverdues = assignedTasks.filter((task) => {
+    const priority = String(task?.priority || "").toLowerCase();
+    if (priority !== "high" && priority !== "critical") {
+      return false;
+    }
+
+    if (isTaskCompleted(task)) {
+      const completedAt = safeDate(getTaskCompletedAt(task));
+      const deadline = safeDate(task?.deadline);
+      return Boolean(completedAt && deadline && completedAt.getTime() > deadline.getTime());
+    }
+
+    const deadline = safeDate(task?.deadline);
+    return Boolean(deadline && deadline.getTime() < now.getTime());
+  }).length;
+
+  const missedDeadlineCount = delayDays.filter((value) => value > 0).length;
+  const severeDelayCount = delayDays.filter((value) => value >= 2).length;
+  const feedbackWarnings = assignedTasks.filter((task) => String(task?.manager_feedback?.criteria || "").trim()).length;
+  const warningCount = feedbackWarnings + missedDeadlineCount;
+  const escalationCount = overdueOpenTasks + highPriorityOverdues + severeDelayCount + Math.max(0, Number(openComplaintCount) || 0);
+
+  // Attendance proxy: share of tasks currently on-time (completed on/before deadline or active and not overdue).
+  const onTimeActiveTasks = assignedTasks.filter((task) => {
+    if (isTaskCompleted(task)) {
+      return false;
+    }
+
+    const deadline = safeDate(task?.deadline);
+    return Boolean(deadline && deadline.getTime() >= now.getTime());
+  }).length;
+
+  const onTimeWorkloadCount = onTimeCompletedTasks + onTimeActiveTasks;
+  const attendancePercent = assignedCount > 0
+    ? (onTimeWorkloadCount / assignedCount) * 100
+    : 0;
+
+  const onTimeRatio = completedCount > 0 ? onTimeCompletedTasks / completedCount : 0;
+  const warningPenalty = Math.min(1, warningCount * 0.1);
+  const escalationPenalty = Math.min(1, escalationCount * 0.08);
+  const managerRating = 1 + (completionRatio * 2) + (onTimeRatio * 2) - warningPenalty - escalationPenalty;
+
+  const recentWindowStart = new Date(now.getTime() - (30 * MS_PER_DAY));
+  const previousWindowStart = new Date(now.getTime() - (60 * MS_PER_DAY));
+
+  const recentTasks = assignedTasks.filter((task) => {
+    const activityAt = safeDate(getTaskActivityAt(task));
+    return Boolean(activityAt && activityAt.getTime() >= recentWindowStart.getTime());
+  });
+
+  const previousTasks = assignedTasks.filter((task) => {
+    const activityAt = safeDate(getTaskActivityAt(task));
+    if (!activityAt) return false;
+    return activityAt.getTime() >= previousWindowStart.getTime() && activityAt.getTime() < recentWindowStart.getTime();
+  });
+
+  const computeWindowScore = (windowTasks) => {
+    if (windowTasks.length === 0) {
+      return completionRatio;
+    }
+
+    const scores = windowTasks.map((task) => {
+      const completedScore = isTaskCompleted(task) ? 1 : 0;
+      const deadline = safeDate(task?.deadline);
+      const endDate = isTaskCompleted(task)
+        ? safeDate(getTaskCompletedAt(task))
+        : now;
+      const isOnTime = Boolean(deadline && endDate && endDate.getTime() <= deadline.getTime());
+      const timelinessScore = isOnTime ? 1 : 0;
+      return (completedScore * 0.6) + (timelinessScore * 0.4);
+    });
+
+    return scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  };
+
+  const recentCompletion = computeWindowScore(recentTasks);
+  const previousCompletion = computeWindowScore(previousTasks);
+
+  const performanceTrend = recentCompletion - previousCompletion;
+
+  const adherenceScores = assignedTasks.map((task) => {
+    const completionScore = isTaskCompleted(task) ? 1 : 0;
+    const deadline = safeDate(task?.deadline);
+    const endDate = isTaskCompleted(task)
+      ? safeDate(getTaskCompletedAt(task))
+      : now;
+    const timelinessScore = Boolean(deadline && endDate && endDate.getTime() <= deadline.getTime()) ? 1 : 0;
+    return (completionScore * 0.6) + (timelinessScore * 0.4);
+  });
+
+  const adherenceMean = adherenceScores.length > 0
+    ? adherenceScores.reduce((sum, value) => sum + value, 0) / adherenceScores.length
+    : 0;
+
+  const adherenceVariance = adherenceScores.length > 1
+    ? adherenceScores.reduce((sum, value) => sum + ((value - adherenceMean) ** 2), 0) / adherenceScores.length
+    : 0;
+
+  const adherenceStd = Math.sqrt(adherenceVariance);
+  const maxReasonableStd = 0.5;
+  const taskConsistency = Math.max(0, 1 - Math.min(1, adherenceStd / maxReasonableStd));
+
+  return {
+    employee_email: employeeEmail,
+    assigned_tasks: assignedCount,
+    completed_tasks: completedCount,
+    completion_ratio: roundTo(completionRatio, 4),
+    avg_delay_days: roundTo(avgDelayDays, 4),
+    attendance_percent: roundTo(Math.max(0, Math.min(100, attendancePercent)), 2),
+    escalation_count: escalationCount,
+    warning_count: warningCount,
+    manager_rating: roundTo(Math.max(1, Math.min(5, managerRating)), 2),
+    performance_trend: roundTo(performanceTrend, 4),
+    task_consistency: roundTo(taskConsistency, 4),
+    source: "computed_from_tasks",
+  };
+};
+
+const syncEmployeeMetrics = async (employeeEmails = []) => {
+  if (!db) {
+    return { processed: 0 };
+  }
+
+  const metricsCollectionNames = Array.from(new Set([
+    mongoMetricsOneCollection,
+    mongoMetricsLegacyCollection,
+  ].filter(Boolean)));
+
+  const normalizedEmails = Array.from(new Set(
+    employeeEmails
+      .map((email) => String(email || "").trim().toLowerCase())
+      .filter(Boolean),
+  ));
+
+  const taskQuery = normalizedEmails.length > 0
+    ? { assigned_to_email: { $in: normalizedEmails } }
+    : {};
+
+  const tasks = await db.collection(mongoTasksCollection).find(taskQuery).toArray();
+  const groupedTasks = new Map();
+
+  for (const task of tasks) {
+    const employeeEmail = String(task?.assigned_to_email || "").trim().toLowerCase();
+    if (!employeeEmail) {
+      continue;
+    }
+
+    if (!groupedTasks.has(employeeEmail)) {
+      groupedTasks.set(employeeEmail, []);
+    }
+    groupedTasks.get(employeeEmail).push(task);
+  }
+
+  const targetEmails = normalizedEmails.length > 0
+    ? normalizedEmails
+    : Array.from(groupedTasks.keys());
+
+  const complaintQuery = normalizedEmails.length > 0
+    ? {
+      employee_email: { $in: normalizedEmails },
+      status: { $ne: "resolved" },
+    }
+    : { status: { $ne: "resolved" } };
+
+  const complaints = await db
+    .collection(mongoComplainsCollection)
+    .find(complaintQuery, { projection: { employee_email: 1 } })
+    .toArray();
+
+  const complaintCountsByEmail = new Map();
+  for (const complaint of complaints) {
+    const employeeEmail = String(complaint?.employee_email || "").trim().toLowerCase();
+    if (!employeeEmail) {
+      continue;
+    }
+
+    complaintCountsByEmail.set(employeeEmail, (complaintCountsByEmail.get(employeeEmail) || 0) + 1);
+  }
+
+  for (const employeeEmail of targetEmails) {
+    const metricsPayload = computeEmployeeMetrics(
+      employeeEmail,
+      groupedTasks.get(employeeEmail) || [],
+      complaintCountsByEmail.get(employeeEmail) || 0,
+    );
+    const metricsTimestamp = new Date().toISOString();
+
+    for (const collectionName of metricsCollectionNames) {
+      await db.collection(collectionName).updateOne(
+        { employee_email: employeeEmail },
+        {
+          $set: {
+            ...metricsPayload,
+            updated_at: metricsTimestamp,
+          },
+          $setOnInsert: {
+            created_at: metricsTimestamp,
+          },
+        },
+        { upsert: true },
+      );
+    }
+
+    const metricsOneDocument = await db.collection(mongoMetricsOneCollection).findOne(
+      { employee_email: employeeEmail },
+      {
+        projection: {
+          completion_ratio: 1,
+          avg_delay_days: 1,
+          attendance_percent: 1,
+          escalation_count: 1,
+          warning_count: 1,
+          manager_rating: 1,
+          performance_trend: 1,
+          task_consistency: 1,
+          assigned_tasks: 1,
+          completed_tasks: 1,
+        },
+      },
+    );
+
+    await db.collection(mongoEmployeePerformanceCollection).updateOne(
+      { employee_email: employeeEmail },
+      {
+        $set: {
+          employee_email: employeeEmail,
+          completion_ratio: Number(metricsOneDocument?.completion_ratio ?? 0),
+          avg_delay_days: Number(metricsOneDocument?.avg_delay_days ?? 0),
+          attendance_percent: Number(metricsOneDocument?.attendance_percent ?? 0),
+          escalation_count: Number(metricsOneDocument?.escalation_count ?? 0),
+          warning_count: Number(metricsOneDocument?.warning_count ?? 0),
+          manager_rating: Number(metricsOneDocument?.manager_rating ?? 0),
+          performance_trend: Number(metricsOneDocument?.performance_trend ?? 0),
+          task_consistency: Number(metricsOneDocument?.task_consistency ?? 0),
+          assigned_tasks: Number(metricsOneDocument?.assigned_tasks ?? 0),
+          completed_tasks: Number(metricsOneDocument?.completed_tasks ?? 0),
+          updated_at: new Date().toISOString(),
+        },
+        $setOnInsert: {
+          created_at: new Date().toISOString(),
+        },
+      },
+      { upsert: true },
+    );
+  }
+
+  return { processed: targetEmails.length };
+};
+
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
@@ -152,7 +510,12 @@ app.get("/api/audit-logs/stream", (req, res) => {
   });
 });
 
-app.use("/api", createAuthRoutes({ getDb: () => db, logAudit }));
+app.use("/api", createAuthRoutes({
+  getDb: () => db,
+  logAudit,
+  employeePerformanceCollectionName: mongoEmployeePerformanceCollection,
+  attendanceSessionsCollectionName: process.env.MONGODB_ATTENDANCE_SESSIONS_COLLECTION || "attendance_sessions",
+}));
 
 const getCertificateWebhookUrls = () => {
   const configuredWebhookUrl = process.env.N8N_CERTIFICATE_WEBHOOK_URL;
@@ -1437,6 +1800,195 @@ app.get("/api/employees/:id", async (req, res) => {
   }
 });
 
+app.post("/api/hr/provision-employee", async (req, res) => {
+  const employeeId = String(req.body?.employee_id || "").trim();
+
+  if (!employeeId || !ObjectId.isValid(employeeId)) {
+    return res.status(400).json({ error: "employee_id is required and must be a valid ObjectId" });
+  }
+
+  try {
+    const employee = await db.collection(mongoEmployeesCollection).findOne({ _id: new ObjectId(employeeId) });
+    if (!employee) {
+      return res.status(404).json({ error: "Employee not found in the employees collection" });
+    }
+
+    const employeeEmail = String(employee.email || "").trim().toLowerCase();
+    if (!employeeEmail) {
+      return res.status(400).json({ error: "Employee record has no email address" });
+    }
+
+    const firebaseAdmin = getFirebaseAdmin();
+
+    // Ensure Firebase Auth account exists. Password will be set by n8n callback.
+    let firebaseUid;
+    try {
+      const firebaseUser = await firebaseAdmin.auth().createUser({
+        email: employeeEmail,
+        password: generatePasscode(),
+        displayName: String(employee.full_name || "").trim() || employeeEmail,
+        emailVerified: true,
+      });
+      firebaseUid = firebaseUser.uid;
+    } catch (createError) {
+      if (createError?.errorInfo?.code === "auth/email-already-exists") {
+        const existingUser = await firebaseAdmin.auth().getUserByEmail(employeeEmail);
+        firebaseUid = existingUser.uid;
+      } else {
+        throw createError;
+      }
+    }
+
+    // Upsert in users collection
+    await db.collection(mongoUsersCollection).updateOne(
+      { firebase_uid: firebaseUid },
+      {
+        $set: {
+          firebase_uid: firebaseUid,
+          email: employeeEmail,
+          role: "employee",
+          is_active: true,
+          employee_id: employeeId,
+          updated_at: new Date().toISOString(),
+        },
+        $setOnInsert: { created_at: new Date().toISOString() },
+      },
+      { upsert: true },
+    );
+
+    if (!n8nSendPassWebhookUrl) {
+      return res.status(500).json({
+        error: "N8N_SENDPASS_WEBHOOK_URL is missing.",
+      });
+    }
+
+    const webhookPayload = {
+      employee_id: employeeId,
+      employee_email: employeeEmail,
+      employee_name: String(employee.full_name || "").trim() || "Employee",
+      role: "employee",
+      department: String(employee.department || "").trim() || "",
+      manager: String(employee.manager_assigned || "").trim() || "",
+      firebase_uid: firebaseUid,
+      requested_by: deriveActorFromRequest(req),
+      requested_at: new Date().toISOString(),
+      password_update_callback_url: `${publicBaseUrl || "http://localhost:5000"}/api/integrations/n8n/employee-passcode`,
+    };
+
+    const webhookHeaders = {
+      "Content-Type": "application/json",
+      ...(n8nSendPassWebhookSecret ? { "x-regnify-signature": n8nSendPassWebhookSecret } : {}),
+    };
+
+    const webhookResponse = await fetch(n8nSendPassWebhookUrl, {
+      method: "POST",
+      headers: webhookHeaders,
+      body: JSON.stringify(webhookPayload),
+    });
+
+    const webhookResponseText = await webhookResponse.text();
+    let webhookResponsePayload;
+    try {
+      webhookResponsePayload = webhookResponseText ? JSON.parse(webhookResponseText) : null;
+    } catch {
+      webhookResponsePayload = webhookResponseText || null;
+    }
+
+    if (!webhookResponse.ok) {
+      return res.status(502).json({
+        error: "Unable to trigger credential workflow in n8n",
+        details: webhookResponsePayload,
+      });
+    }
+
+    await logAudit({
+      actor: deriveActorFromRequest(req),
+      action: "Employee Created",
+      entity: "Employee",
+      entityId: employeeId,
+      metadata: {
+        full_name: String(employee.full_name || ""),
+        email: employeeEmail,
+        provisioned_by: "HR",
+      },
+    });
+
+    return res.status(200).json({
+      message: `Credential workflow triggered for ${employeeEmail}`,
+      email: employeeEmail,
+      workflow: webhookResponsePayload,
+    });
+  } catch (serverError) {
+    console.error("[ProvisionEmployee] Error:", serverError);
+    return res.status(500).json({ error: serverError?.message || "Unable to provision employee account" });
+  }
+});
+
+app.post("/api/integrations/n8n/employee-passcode", async (req, res) => {
+  if (!n8nServiceToken) {
+    return res.status(503).json({ error: "N8N_SERVICE_TOKEN is not configured on backend." });
+  }
+
+  const authHeader = String(req.headers.authorization || "");
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  if (!token || token !== n8nServiceToken) {
+    return res.status(401).json({ error: "Unauthorized n8n callback" });
+  }
+
+  const employeeEmail = String(req.body?.employee_email || "").trim().toLowerCase();
+  const firebaseUid = String(req.body?.firebase_uid || "").trim();
+  const passcode = String(req.body?.passcode || "");
+
+  if (!passcode || passcode.length < 8) {
+    return res.status(400).json({ error: "passcode is required and must be at least 8 characters" });
+  }
+
+  if (!employeeEmail && !firebaseUid) {
+    return res.status(400).json({ error: "employee_email or firebase_uid is required" });
+  }
+
+  try {
+    const firebaseAdmin = getFirebaseAdmin();
+
+    let targetUid = firebaseUid;
+    if (!targetUid) {
+      const firebaseUser = await firebaseAdmin.auth().getUserByEmail(employeeEmail);
+      targetUid = firebaseUser.uid;
+    }
+
+    await firebaseAdmin.auth().updateUser(targetUid, {
+      password: passcode,
+      emailVerified: true,
+    });
+
+    await db.collection(mongoUsersCollection).updateOne(
+      { firebase_uid: targetUid },
+      {
+        $set: {
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        },
+      },
+    );
+
+    await logAudit({
+      actor: "n8n",
+      action: "Profile Data Updated",
+      entity: "Employee Credentials",
+      entityId: targetUid,
+      metadata: {
+        employee_email: employeeEmail || null,
+        source: "n8n_sendpass_workflow",
+      },
+    });
+
+    return res.status(200).json({ message: "Employee passcode updated" });
+  } catch (serverError) {
+    console.error("[N8nPasscodeUpdate] Error:", serverError);
+    return res.status(500).json({ error: serverError?.message || "Unable to update employee passcode" });
+  }
+});
+
 app.post("/api/employees", async (req, res) => {
   const {
     full_name,
@@ -1492,6 +2044,212 @@ app.post("/api/employees", async (req, res) => {
   } catch (serverError) {
     console.error("[AddEmployee] Mongo insert error:", serverError);
     return res.status(500).json({ error: "Unexpected backend error" });
+  }
+});
+
+const mapTeamDocumentToApi = (teamDocument) => ({
+  id: teamDocument._id?.toString?.() || teamDocument.id,
+  name: teamDocument.name || "",
+  managerName: teamDocument.manager_name || "",
+  managerEmail: teamDocument.manager_email || "",
+  members: Array.isArray(teamDocument.members)
+    ? teamDocument.members.map((member) => ({
+        employeeId: String(member.employee_id || ""),
+        name: String(member.name || ""),
+        email: String(member.email || ""),
+        role: String(member.role || ""),
+        department: String(member.department || ""),
+      }))
+    : [],
+  createdAt: teamDocument.created_at || null,
+  updatedAt: teamDocument.updated_at || null,
+});
+
+app.get("/api/teams", async (req, res) => {
+  const managerEmail = String(req.query.managerEmail || "").trim().toLowerCase();
+  const query = managerEmail ? { manager_email: managerEmail } : {};
+
+  try {
+    const teams = await db
+      .collection(mongoTeamsCollection)
+      .find(query, { sort: { updated_at: -1 } })
+      .toArray();
+
+    return res.status(200).json({ teams: teams.map(mapTeamDocumentToApi) });
+  } catch (serverError) {
+    console.error("[GetTeams] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch teams" });
+  }
+});
+
+app.post("/api/teams", async (req, res) => {
+  const { name, memberEmployeeIds, managerName, managerEmail } = req.body ?? {};
+
+  const normalizedName = String(name || "").trim();
+  const normalizedMemberIds = Array.isArray(memberEmployeeIds)
+    ? memberEmployeeIds.map((employeeId) => String(employeeId || "").trim()).filter(Boolean)
+    : [];
+
+  if (!normalizedName || normalizedMemberIds.length === 0) {
+    return res.status(400).json({ error: "name and at least one memberEmployeeId are required" });
+  }
+
+  const validObjectIds = normalizedMemberIds.filter((employeeId) => ObjectId.isValid(employeeId)).map((employeeId) => new ObjectId(employeeId));
+  if (validObjectIds.length === 0) {
+    return res.status(400).json({ error: "No valid employee ids provided" });
+  }
+
+  try {
+    const membersSource = await db
+      .collection(mongoEmployeesCollection)
+      .find({ _id: { $in: validObjectIds } })
+      .toArray();
+
+    if (membersSource.length === 0) {
+      return res.status(404).json({ error: "No matching employees found" });
+    }
+
+    const members = membersSource.map((employee) => ({
+      employee_id: employee._id.toString(),
+      name: String(employee.full_name || "").trim(),
+      email: String(employee.email || "").trim().toLowerCase(),
+      role: String(employee.role || "").trim(),
+      department: String(employee.department || "").trim(),
+    }));
+
+    const payload = {
+      name: normalizedName,
+      manager_name: String(managerName || "Manager").trim(),
+      manager_email: String(managerEmail || "").trim().toLowerCase(),
+      members,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const result = await db.collection(mongoTeamsCollection).insertOne(payload);
+
+    await logAudit({
+      actor: payload.manager_email || deriveActorFromRequest(req),
+      action: "Team Created",
+      entity: "Team",
+      entityId: result.insertedId.toString(),
+      metadata: {
+        team_name: payload.name,
+        member_count: members.length,
+      },
+    });
+
+    return res.status(201).json({
+      message: "Team created",
+      team: mapTeamDocumentToApi({ _id: result.insertedId, ...payload }),
+    });
+  } catch (serverError) {
+    console.error("[CreateTeam] Mongo write error:", serverError);
+    return res.status(500).json({ error: "Unable to create team" });
+  }
+});
+
+app.post("/api/teams/:id/assign-task", async (req, res) => {
+  const { id } = req.params;
+  const {
+    title,
+    overview,
+    category,
+    priority,
+    estimatedCompletionTime,
+    deadline,
+    difficulty,
+    requiredSkills,
+    acceptanceCriteria,
+    reminderEnabled,
+    reminderBefore,
+    managerName,
+    managerEmail,
+  } = req.body ?? {};
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid team id" });
+  }
+
+  if (!title || !overview || !category || !priority || !deadline || !difficulty) {
+    return res.status(400).json({ error: "title, overview, category, priority, deadline and difficulty are required" });
+  }
+
+  try {
+    const team = await db.collection(mongoTeamsCollection).findOne({ _id: new ObjectId(id) });
+    if (!team) {
+      return res.status(404).json({ error: "Team not found" });
+    }
+
+    const members = Array.isArray(team.members) ? team.members.filter((member) => member?.employee_id && member?.email) : [];
+    if (members.length === 0) {
+      return res.status(400).json({ error: "Team has no members" });
+    }
+
+    const nowIso = new Date().toISOString();
+    const taskPayloads = members.map((member) => ({
+      title: String(title).trim(),
+      overview: String(overview).trim(),
+      assigned_to_employee_id: String(member.employee_id),
+      assigned_to_name: String(member.name || "").trim(),
+      assigned_to_role: String(member.role || "").trim(),
+      assigned_to_email: String(member.email || "").trim().toLowerCase(),
+      department: String(member.department || "").trim(),
+      category: String(category).trim(),
+      priority: String(priority).trim(),
+      estimated_completion_time: String(estimatedCompletionTime || "").trim(),
+      deadline: String(deadline),
+      difficulty: String(difficulty).trim(),
+      required_skills: Array.isArray(requiredSkills)
+        ? requiredSkills.map((skill) => String(skill).trim()).filter(Boolean)
+        : [],
+      attachments: [],
+      acceptance_criteria: Array.isArray(acceptanceCriteria)
+        ? acceptanceCriteria.map((criterion) => String(criterion).trim()).filter(Boolean)
+        : [],
+      reminder_enabled: Boolean(reminderEnabled),
+      reminder_before: reminderEnabled ? String(reminderBefore || "") : "",
+      status: "Pending",
+      manager_status: "Pending",
+      employee_status: "pending",
+      progress: 0,
+      submission: {
+        deployment_url: "",
+        employee_comment: "",
+        files: [],
+        submitted_at: null,
+      },
+      manager_name: String(managerName || team.manager_name || "Manager").trim(),
+      manager_email: String(managerEmail || team.manager_email || "").trim().toLowerCase(),
+      team_id: id,
+      team_name: String(team.name || "").trim(),
+      created_at: nowIso,
+      updated_at: nowIso,
+    }));
+
+    const insertResult = await db.collection(mongoTasksCollection).insertMany(taskPayloads);
+
+    await syncEmployeeMetrics(members.map((member) => String(member.email || "").trim().toLowerCase()));
+
+    await logAudit({
+      actor: String(managerEmail || team.manager_email || "").trim().toLowerCase() || deriveActorFromRequest(req),
+      action: "Team Task Assigned",
+      entity: "Team",
+      entityId: id,
+      metadata: {
+        team_name: String(team.name || "").trim(),
+        title: String(title).trim(),
+        assigned_count: taskPayloads.length,
+      },
+    });
+
+    return res.status(201).json({
+      message: "Task assigned to team",
+      createdTasks: Object.keys(insertResult.insertedIds).length,
+    });
+  } catch (serverError) {
+    console.error("[AssignTeamTask] Mongo write error:", serverError);
+    return res.status(500).json({ error: "Unable to assign task to team" });
   }
 });
 
@@ -1679,6 +2437,8 @@ app.post("/api/tasks", async (req, res) => {
   try {
     const result = await db.collection(mongoTasksCollection).insertOne(payload);
 
+    await syncEmployeeMetrics([payload.assigned_to_email]);
+
     await logAudit({
       actor: deriveActorFromRequest(req),
       action: "Task Assigned",
@@ -1737,7 +2497,7 @@ const handleTaskSubmit = async (req, res) => {
       { _id: new ObjectId(id) },
       {
         $set: {
-          status: "completed",
+          status: "In Progress",
           employee_status: "completed",
           manager_status: "In Progress",
           progress: 100,
@@ -1759,6 +2519,8 @@ const handleTaskSubmit = async (req, res) => {
     if (!updatedTask) {
       return res.status(404).json({ error: "Task not found" });
     }
+
+    await syncEmployeeMetrics([String(updatedTask.assigned_to_email || "").trim().toLowerCase()]);
 
     await logAudit({
       actor: deriveActorFromRequest(req),
@@ -1833,6 +2595,8 @@ const handleManagerReviewTask = async (req, res) => {
       return res.status(404).json({ error: "Task not found" });
     }
 
+    await syncEmployeeMetrics([String(updatedTask.assigned_to_email || "").trim().toLowerCase()]);
+
     await logAudit({
       actor: deriveActorFromRequest(req),
       action: action === "approve" ? "Task Approved" : "Task Feedback Sent",
@@ -1855,6 +2619,40 @@ const handleManagerReviewTask = async (req, res) => {
 
 app.patch("/api/tasks/:id/manager-review", handleManagerReviewTask);
 app.post("/api/tasks/:id/manager-review", handleManagerReviewTask);
+
+app.post("/api/employee-performance/recompute", async (req, res) => {
+  const employeeEmail = String(req.body?.employee_email || req.query?.employeeEmail || "").trim().toLowerCase();
+
+  try {
+    const result = await syncEmployeeMetrics(employeeEmail ? [employeeEmail] : []);
+    return res.status(200).json({
+      message: employeeEmail
+        ? `Employee performance recomputed for ${employeeEmail}`
+        : "Employee performance recomputed for all task-linked employees",
+      processed: result.processed,
+    });
+  } catch (serverError) {
+    console.error("[RecomputeEmployeePerformance] Compute error:", serverError);
+    return res.status(500).json({ error: "Unable to recompute employee performance" });
+  }
+});
+
+app.get("/api/metrics-one", async (req, res) => {
+  const employeeEmail = String(req.query.employeeEmail || "").trim().toLowerCase();
+  const query = employeeEmail ? { employee_email: employeeEmail } : {};
+
+  try {
+    const metrics = await db
+      .collection(mongoMetricsOneCollection)
+      .find(query, { sort: { updated_at: -1 } })
+      .toArray();
+
+    return res.status(200).json({ metrics });
+  } catch (serverError) {
+    console.error("[GetMetricsOne] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch metrics_one records" });
+  }
+});
 
 const mapEmployeePerformanceToApi = (performanceDocument) => ({
   id: performanceDocument._id?.toString?.() || performanceDocument.id,
@@ -1977,6 +2775,165 @@ app.post("/api/employee-performance", async (req, res) => {
   }
 });
 
+const mlApiBaseUrl = process.env.ML_API_URL || "http://localhost:8000";
+
+app.get("/api/ml/risk-prediction/:employeeEmail", async (req, res) => {
+  const employeeEmail = String(req.params.employeeEmail || "").trim().toLowerCase();
+  if (!employeeEmail) {
+    return res.status(400).json({ error: "employeeEmail is required" });
+  }
+
+  try {
+    const record = await db
+      .collection(mongoEmployeePerformanceCollection)
+      .findOne({ employee_email: employeeEmail });
+
+    if (!record) {
+      return res.status(404).json({ error: "No performance record found for this employee" });
+    }
+
+    const metrics = mapEmployeePerformanceToApi(record);
+
+    const mlPayload = {
+      completion_ratio: metrics.completion_ratio,
+      avg_delay_days: metrics.avg_delay_days,
+      attendance_percent: metrics.attendance_percent,
+      escalation_count: metrics.escalation_count,
+      warning_count: metrics.warning_count,
+      manager_rating: metrics.manager_rating,
+      performance_trend: metrics.performance_trend,
+      task_consistency: metrics.task_consistency,
+    };
+
+    let prediction = null;
+    let mlError = null;
+
+    try {
+      const mlResponse = await fetch(`${mlApiBaseUrl}/ml/predict-risk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mlPayload),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (mlResponse.ok) {
+        prediction = await mlResponse.json();
+      } else {
+        const errBody = await mlResponse.text().catch(() => "");
+        mlError = `ML service returned ${mlResponse.status}: ${errBody}`;
+        console.warn("[MLRiskPrediction] ML API error:", mlError);
+      }
+    } catch (mlCallError) {
+      mlError = mlCallError instanceof Error ? mlCallError.message : "ML service unavailable";
+      console.warn("[MLRiskPrediction] ML call failed:", mlError);
+    }
+
+    return res.status(200).json({
+      metrics,
+      prediction,
+      ml_error: mlError,
+    });
+  } catch (serverError) {
+    console.error("[MLRiskPrediction] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch risk prediction" });
+  }
+});
+
+const mapComplaintToApi = (complaintDocument) => ({
+  id: complaintDocument._id?.toString?.() || complaintDocument.id,
+  employee_email: String(complaintDocument.employee_email || "").trim().toLowerCase(),
+  employee_name: String(complaintDocument.employee_name || "").trim(),
+  manager_email: String(complaintDocument.manager_email || "").trim().toLowerCase(),
+  manager_name: String(complaintDocument.manager_name || "").trim(),
+  complaint_text: String(complaintDocument.complaint_text || "").trim(),
+  severity: String(complaintDocument.severity || "high").toLowerCase(),
+  status: String(complaintDocument.status || "open").toLowerCase(),
+  created_at: complaintDocument.created_at || null,
+  updated_at: complaintDocument.updated_at || null,
+});
+
+app.get("/api/complains", async (req, res) => {
+  const requestedLimit = Number(req.query.limit);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.min(requestedLimit, 200)
+    : 50;
+  const status = String(req.query.status || "").trim().toLowerCase();
+
+  const query = status ? { status } : {};
+
+  try {
+    const records = await db
+      .collection(mongoComplainsCollection)
+      .find(query, { sort: { created_at: -1 } })
+      .limit(limit)
+      .toArray();
+
+    return res.status(200).json({
+      complaints: records.map(mapComplaintToApi),
+    });
+  } catch (serverError) {
+    console.error("[GetComplains] Mongo read error:", serverError);
+    return res.status(500).json({ error: "Unable to fetch complaints" });
+  }
+});
+
+app.post("/api/complains", async (req, res) => {
+  const {
+    employee_email,
+    employee_name,
+    manager_email,
+    manager_name,
+    complaint_text,
+    severity,
+  } = req.body ?? {};
+
+  const normalizedEmployeeEmail = String(employee_email || "").trim().toLowerCase();
+  const normalizedComplaintText = String(complaint_text || "").trim();
+
+  if (!normalizedEmployeeEmail || !normalizedComplaintText) {
+    return res.status(400).json({ error: "employee_email and complaint_text are required" });
+  }
+
+  const nowIso = new Date().toISOString();
+  const payload = {
+    employee_email: normalizedEmployeeEmail,
+    employee_name: String(employee_name || "").trim(),
+    manager_email: String(manager_email || "").trim().toLowerCase(),
+    manager_name: String(manager_name || "").trim(),
+    complaint_text: normalizedComplaintText,
+    severity: String(severity || "high").trim().toLowerCase() || "high",
+    status: "open",
+    created_at: nowIso,
+    updated_at: nowIso,
+  };
+
+  try {
+    const result = await db.collection(mongoComplainsCollection).insertOne(payload);
+    const savedRecord = await db.collection(mongoComplainsCollection).findOne({ _id: result.insertedId });
+
+    await syncEmployeeMetrics([normalizedEmployeeEmail]);
+
+    await logAudit({
+      actor: payload.manager_email || payload.manager_name || deriveActorFromRequest(req),
+      action: "Manager Warning Submitted",
+      entity: "Complaint",
+      entityId: result.insertedId.toString(),
+      metadata: {
+        employee_email: payload.employee_email,
+        severity: payload.severity,
+      },
+    });
+
+    return res.status(201).json({
+      message: "Warning complaint submitted",
+      complaint: savedRecord ? mapComplaintToApi(savedRecord) : null,
+    });
+  } catch (serverError) {
+    console.error("[CreateComplaint] Mongo insert error:", serverError);
+    return res.status(500).json({ error: "Unable to submit complaint" });
+  }
+});
+
 app.get("/api/audit-logs", async (req, res) => {
   const requestedLimit = Number(req.query.limit);
   const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
@@ -2000,6 +2957,31 @@ app.get("/api/audit-logs", async (req, res) => {
     console.error("[GetAuditLogs] Mongo read error:", serverError);
     return res.status(500).json({ error: "Unable to fetch audit logs" });
   }
+});
+
+app.post("/api/audit-logs/event", async (req, res) => {
+  const { action, entity, entityId, metadata, actor } = req.body ?? {};
+
+  const normalizedAction = String(action || "").trim();
+  const normalizedEntity = String(entity || "").trim();
+
+  if (!normalizedAction || !normalizedEntity) {
+    return res.status(400).json({ error: "action and entity are required" });
+  }
+
+  if (!allowedAuditActions.has(normalizedAction)) {
+    return res.status(400).json({ error: "Unsupported audit action" });
+  }
+
+  await logAudit({
+    actor: String(actor || deriveActorFromRequest(req) || "System").trim() || "System",
+    action: normalizedAction,
+    entity: normalizedEntity,
+    entityId: entityId ? String(entityId) : null,
+    metadata: metadata && typeof metadata === "object" ? metadata : {},
+  });
+
+  return res.status(201).json({ message: "Audit event recorded" });
 });
 
 app.use((error, _req, res, next) => {

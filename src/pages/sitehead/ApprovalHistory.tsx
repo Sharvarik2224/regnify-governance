@@ -2,14 +2,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Search, Download } from "lucide-react";
-import { approvalHistory } from "@/data/siteHeadMockData";
 import { useState } from "react";
 
 const ApprovalHistory = () => {
   const [search, setSearch] = useState("");
-  const filtered = approvalHistory.filter(a => !search || a.employee.toLowerCase().includes(search.toLowerCase()));
+  const filtered: Array<{ id: string }> = [];
 
   return (
     <div className="space-y-6">
@@ -40,20 +38,11 @@ const ApprovalHistory = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="font-medium text-foreground">{r.employee}</TableCell>
-                  <TableCell><Badge variant="outline" className="text-[10px]">{r.hrRecommendation}</Badge></TableCell>
-                  <TableCell>
-                    <Badge className={`text-[10px] ${r.finalDecision === "Confirmed" ? "bg-green-100 text-green-700 border-0" : r.finalDecision === "Terminated" ? "bg-destructive/10 text-destructive border-0" : "bg-amber-100 text-amber-700 border-0"}`}>
-                      {r.finalDecision}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{r.date}</TableCell>
-                  <TableCell className="text-muted-foreground max-w-xs truncate">{r.comment}</TableCell>
-                  <TableCell className="text-muted-foreground">{r.approvedBy}</TableCell>
+              {filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell className="text-muted-foreground" colSpan={6}>No approval history available.</TableCell>
                 </TableRow>
-              ))}
+              ) : null}
             </TableBody>
           </Table>
         </CardContent>

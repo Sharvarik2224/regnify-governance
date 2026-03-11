@@ -1,93 +1,178 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { governanceAlerts } from "@/data/managerMockData";
+import { API_BASE_URL } from "@/lib/api";
 
-const tabs = ["All Alerts", "Overdue", "Compliance", "Resolved"];
-
-const severityStyle = (severity: string) => {
-  if (severity.includes("CRITICAL")) return "bg-destructive text-destructive-foreground";
-  if (severity.includes("WARNING")) return "bg-warning text-warning-foreground";
-  return "bg-success text-success-foreground";
+type AuditLogRecord = {
+  id: string;
+  timestamp?: string;
+  actor?: string;
+  action?: string;
+  entity?: string;
 };
 
-const summaryCards = [
-  { label: "TOTAL ALERTS", value: "06" },
-  { label: "OVERDUE", value: "03", valueColor: "text-destructive" },
-  { label: "COMPLIANCE", value: "02", valueColor: "text-warning" },
-  { label: "RESOLVED", value: "01", valueColor: "text-success" },
-];
+type TaskRecord = {
+  id: string;
+  title?: string;
+  assignedToName?: string;
+  managerStatus?: string;
+  updatedAt?: string;
+  createdAt?: string;
+};
+
+const toUiTimestamp = (value?: string) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
 
 const ManagerAlerts = () => {
-  const [activeTab, setActiveTab] = useState("All Alerts");
+  const [search, setSearch] = useState("");
+  const [logs, setLogs] = useState<AuditLogRecord[]>([]);
+  const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = governanceAlerts.filter((a) => {
-    if (activeTab === "All Alerts") return true;
-    if (activeTab === "Overdue") return a.category === "Overdue";
-    if (activeTab === "Compliance") return a.category === "Compliance";
-    if (activeTab === "Resolved") return a.category === "Resolved";
-    return true;
-  });
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [logsResponse, tasksResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/audit-logs?limit=80`),
+          fetch(`${API_BASE_URL}/api/tasks`),
+        ]);
+
+        const logsPayload = await logsResponse.json().catch(() => []);
+        const tasksPayload = await tasksResponse.json().catch(() => ({}));
+
+        setLogs(Array.isArray(logsPayload) ? logsPayload : []);
+        setTasks(Array.isArray(tasksPayload?.tasks) ? tasksPayload.tasks : []);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void load();
+  }, []);
+
+  const normalizedSearch = search.trim().toLowerCase();
+
+  const filteredLogs = useMemo(
+    () => logs.filter((log) => {
+      if (!normalizedSearch) return true;
+      return [log.actor, log.action, log.entity, log.timestamp]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedSearch);
+    }),
+    [logs, normalizedSearch],
+  );
+
+  const taskLogs = useMemo(
+    () => [...tasks]
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime())
+      .filter((task) => {
+        if (!normalizedSearch) return true;
+        return [task.title, task.assignedToName, task.managerStatus]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedSearch);
+      })
+      .slice(0, 80),
+    [tasks, normalizedSearch],
+  );
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Governance Alerts</h1>
-        <div className="flex gap-3 items-center">
-          <div className="relative w-60">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search alerts..." className="pl-9" />
-          </div>
-          <Button size="sm"><Download className="mr-2 h-4 w-4" />Export Audit Trail</Button>
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Audit Logs and Task Logs</h1>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-4">
+        <div className="rounded-lg border border-border bg-card p-5">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">AUDIT ENTRIES</span>
+          <p className="text-3xl font-bold mt-1 text-foreground">{loading ? "-" : filteredLogs.length}</p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">TASK EVENTS</span>
+          <p className="text-3xl font-bold mt-1 text-foreground">{loading ? "-" : taskLogs.length}</p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">TASK APPROVALS</span>
+          <p className="text-3xl font-bold mt-1 text-foreground">
+            {loading ? "-" : taskLogs.filter((task) => String(task.managerStatus || "").toLowerCase() === "completed").length}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">PENDING REVIEWS</span>
+          <p className="text-3xl font-bold mt-1 text-foreground">
+            {loading ? "-" : taskLogs.filter((task) => String(task.managerStatus || "").toLowerCase() === "pending").length}
+          </p>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 sm:grid-cols-4">
-        {summaryCards.map((c) => (
-          <div key={c.label} className="rounded-lg border border-border bg-card p-5">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{c.label}</span>
-            <p className={`text-3xl font-bold mt-1 ${c.valueColor || "text-foreground"}`}>{c.value}</p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="border-b border-border px-5 py-3">
+            <h2 className="font-semibold text-foreground">Audit Logs</h2>
           </div>
-        ))}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-6 border-b border-border">
-        {tabs.map((tab) => (
-          <button key={tab} onClick={() => setActiveTab(tab)} className={`pb-3 text-sm font-medium transition-colors ${activeTab === tab ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}>
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {/* Alert Cards */}
-      <div className="space-y-4">
-        {filtered.map((alert) => (
-          <div key={alert.id} className="rounded-lg border border-border bg-card p-6">
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 mb-2">
-                  <span className={`rounded-md px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${severityStyle(alert.severity)}`}>
-                    {alert.severity}
-                  </span>
-                  <span className="text-xs text-muted-foreground">ID: #{alert.id.toUpperCase()}</span>
-                </div>
-                <h3 className="text-lg font-semibold text-foreground mb-1">{alert.title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{alert.description}</p>
-                <div className="flex gap-3 mt-4">
-                  <Button variant="outline" size="sm">
-                    {alert.severity.includes("CRITICAL") ? "Review Audit Trail" : alert.severity.includes("RESOLVED") ? "View Details" : "View Details"}
-                  </Button>
-                  <Button size="sm">
-                    {alert.severity.includes("CRITICAL") ? "Assign Investigation" : alert.severity.includes("RESOLVED") ? "Archive" : "Acknowledge"}
-                  </Button>
-                </div>
-              </div>
-            </div>
+          <div className="max-h-[520px] overflow-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  <th className="px-5 py-3">Timestamp</th>
+                  <th className="px-5 py-3">Actor</th>
+                  <th className="px-5 py-3">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredLogs.length === 0 ? (
+                  <tr>
+                    <td className="px-5 py-4 text-sm text-muted-foreground" colSpan={3}>No audit logs found.</td>
+                  </tr>
+                ) : filteredLogs.map((log) => (
+                  <tr key={log.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <td className="px-5 py-4 text-xs text-muted-foreground">{toUiTimestamp(log.timestamp)}</td>
+                    <td className="px-5 py-4 text-sm text-foreground">{log.actor || "System"}</td>
+                    <td className="px-5 py-4 text-sm text-foreground">{log.action || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ))}
+        </div>
+
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="border-b border-border px-5 py-3">
+            <h2 className="font-semibold text-foreground">Task Logs</h2>
+          </div>
+          <div className="max-h-[520px] overflow-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  <th className="px-5 py-3">Task</th>
+                  <th className="px-5 py-3">Assignee</th>
+                  <th className="px-5 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {taskLogs.length === 0 ? (
+                  <tr>
+                    <td className="px-5 py-4 text-sm text-muted-foreground" colSpan={3}>No task logs found.</td>
+                  </tr>
+                ) : taskLogs.map((task) => (
+                  <tr key={task.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                    <td className="px-5 py-4 text-sm text-foreground">{task.title || "Untitled task"}</td>
+                    <td className="px-5 py-4 text-sm text-muted-foreground">{task.assignedToName || "-"}</td>
+                    <td className="px-5 py-4 text-sm text-foreground">{task.managerStatus || "Pending"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   );

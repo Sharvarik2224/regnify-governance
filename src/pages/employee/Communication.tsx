@@ -42,6 +42,14 @@ type HrRequestRecord = {
   feedback_notes: HrFeedbackNote[];
 };
 
+type HrFeedbackItem = {
+  requestId: string;
+  requestSubject: string;
+  note: string;
+  hrNameOrEmail: string;
+  createdAt: string | null;
+};
+
 const SUBMIT_TASK_ENDPOINT = (taskId: string) => `${API_BASE_URL}/api/tasks/${taskId}/submit`;
 
 const toBase64 = (file: File) =>
@@ -211,6 +219,32 @@ const Communication = () => {
     () => tasks.filter((task) => Boolean(task.managerFeedback?.criteria)),
     [tasks],
   );
+
+  const hrFeedbackItems = useMemo<HrFeedbackItem[]>(() => {
+    const items: HrFeedbackItem[] = [];
+
+    for (const request of hrRequests) {
+      for (const note of request.feedback_notes) {
+        if (!note.note) {
+          continue;
+        }
+
+        items.push({
+          requestId: request.id,
+          requestSubject: request.subject,
+          note: note.note,
+          hrNameOrEmail: note.hr_name || note.hr_email || "HR",
+          createdAt: note.created_at,
+        });
+      }
+    }
+
+    return items.sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeB - timeA;
+    });
+  }, [hrRequests]);
 
   const handleManagerSubmit = async () => {
     if (!selectedTaskId) {
@@ -628,6 +662,28 @@ const Communication = () => {
                       <p className="text-xs text-muted-foreground mt-1">{task.managerFeedback?.criteria}</p>
                       <p className="text-[10px] text-muted-foreground mt-2">
                         {task.managerFeedback?.reviewed_at ? `Reviewed: ${new Date(task.managerFeedback.reviewed_at).toLocaleString()}` : "Reviewed"}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Feedback from HR</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {hrFeedbackItems.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No HR feedback received yet.</p>
+                ) : (
+                  hrFeedbackItems.map((item, index) => (
+                    <div key={`${item.requestId}-${index}`} className="rounded-md border border-border p-3">
+                      <p className="text-sm font-semibold text-foreground">{item.requestSubject}</p>
+                      <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">{item.note}</p>
+                      <p className="text-[10px] text-muted-foreground mt-2">
+                        From: {item.hrNameOrEmail}
+                        {item.createdAt ? ` • ${new Date(item.createdAt).toLocaleString()}` : ""}
                       </p>
                     </div>
                   ))

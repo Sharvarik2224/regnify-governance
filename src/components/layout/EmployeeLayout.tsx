@@ -1,5 +1,5 @@
 import { Link, useLocation, Outlet, useNavigate } from "react-router-dom";
-import { Shield, LayoutDashboard, ClipboardList, MessageSquare, Bell, User, BarChart3, CalendarCheck, Settings, Search, LogOut } from "lucide-react";
+import { Shield, LayoutDashboard, ClipboardList, MessageSquare, Bell, User, BarChart3, Settings, Search, LogOut } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,6 @@ const menuItems = [
   { label: "My Tasks", icon: ClipboardList, path: "/employee/tasks" },
   { label: "Communication", icon: MessageSquare, path: "/employee/communication" },
   { label: "Performance", icon: BarChart3, path: "/employee/performance" },
-  { label: "Attendance", icon: CalendarCheck, path: "/employee/attendance" },
   { label: "Profile", icon: User, path: "/employee/profile" },
 ];
 
@@ -64,18 +63,9 @@ const EmployeeLayout = () => {
           </div>
         </nav>
         <div className="border-t border-border p-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">
-              {user?.name?.charAt(0)?.toUpperCase() || "E"}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{user?.name || "Employee"}</p>
-              <p className="text-[10px] text-muted-foreground">Employee</p>
-            </div>
-            <button onClick={handleLogout} className="text-muted-foreground hover:text-destructive">
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
+          <Button variant="outline" size="sm" onClick={handleLogout} className="w-full">
+            Logout
+          </Button>
         </div>
       </aside>
 

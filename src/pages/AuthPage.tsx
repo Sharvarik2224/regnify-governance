@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { Shield, Eye, EyeOff, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,8 +10,33 @@ import { useToast } from "@/components/ui/use-toast";
 const AuthPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { login, signup } = useAuth();
+  const authContext = useAuth();
+  const { login, signup, forgotPassword } = authContext;
   const { toast } = useToast();
+
+  // If still loading auth, show loading state
+  if (authContext.isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
+        <div className="text-center text-white">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mx-auto mb-4" />
+          <p>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const dashboardMap: Record<UserRole, string> = {
+    hr: "/hr/dashboard",
+    manager: "/manager/dashboard",
+    employee: "/employee/dashboard",
+    "site-head": "/site-head/dashboard",
+  };
+
+  // If authenticated, redirect to role dashboard
+  if (authContext.user) {
+    return <Navigate to={dashboardMap[authContext.user.role]} replace />;
+  }
 
   const modeParam = String(searchParams.get("mode") || "").toLowerCase();
   const initialMode: "login" | "signup" = modeParam === "signup" ? "signup" : "login";
@@ -28,6 +53,7 @@ const AuthPage = () => {
   const [mode, setMode] = useState<"login" | "signup">(initialMode);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -82,13 +108,6 @@ const AuthPage = () => {
         return;
       }
 
-      const dashboardMap: Record<string, string> = {
-        hr: "/hr/dashboard",
-        manager: "/manager/dashboard",
-        employee: "/employee/dashboard",
-        "site-head": "/site-head/dashboard",
-      };
-
       toast({
         title: "Login Successful",
         description: `Logged in as ${role.toUpperCase()}`,
@@ -110,6 +129,25 @@ const AuthPage = () => {
     }
   };
 
+  const handleForgotPassword = async () => {
+    try {
+      setResettingPassword(true);
+      await forgotPassword(form.email, selectedRole);
+      toast({
+        title: "Reset link sent",
+        description: "Check your HR email for the password reset link.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Unable to send reset link",
+        description: error?.message || "Please verify your email and try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setResettingPassword(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
       <div className="w-full max-w-md">
@@ -128,7 +166,7 @@ const AuthPage = () => {
             </p>
           </div>
 
-          {/* Tabs */}
+          {/* Tabs — employees cannot self-sign-up */}
           <div className="flex rounded-lg border border-border bg-muted p-1 mb-6">
             <button
               onClick={() => setMode("login")}
@@ -140,20 +178,39 @@ const AuthPage = () => {
             >
               Login
             </button>
-            <button
-              onClick={() => setMode("signup")}
-              className={`flex-1 rounded-md py-2 text-sm font-medium ${
-                mode === "signup"
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground"
-              }`}
-            >
-              Sign Up
-            </button>
+            {selectedRole !== "employee" && (
+              <button
+                onClick={() => setMode("signup")}
+                className={`flex-1 rounded-md py-2 text-sm font-medium ${
+                  mode === "signup"
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground"
+                }`}
+              >
+                Sign Up
+              </button>
+            )}
           </div>
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Employee self-signup blocked — show informational banner */}
+          {selectedRole === "employee" && mode === "signup" && (
+            <div className="rounded-lg border border-border bg-muted/60 px-4 py-4 text-center mb-4">
+              <p className="text-sm font-medium text-foreground mb-1">Account creation not available</p>
+              <p className="text-xs text-muted-foreground">
+                Employee accounts are created by HR. Please contact your HR administrator — your login credentials will be sent to your registered email.
+              </p>
+              <button
+                type="button"
+                className="mt-3 text-xs text-primary underline"
+                onClick={() => setMode("login")}
+              >
+                Go to Login
+              </button>
+            </div>
+          )}
+
+          {/* Form — hide for blocked employee signup */}
+          <form onSubmit={handleSubmit} className="space-y-4" style={{ display: selectedRole === "employee" && mode === "signup" ? "none" : undefined }}>
             {mode === "signup" && (
               <div>
                 <Label>Full Name</Label>
@@ -198,6 +255,18 @@ const AuthPage = () => {
                   {showPassword ? <EyeOff /> : <Eye />}
                 </button>
               </div>
+              {mode === "login" && selectedRole === "hr" && (
+                <div className="mt-2 text-right">
+                  <button
+                    type="button"
+                    className="text-xs text-primary underline"
+                    onClick={handleForgotPassword}
+                    disabled={resettingPassword || loading}
+                  >
+                    {resettingPassword ? "Sending reset link..." : "Forgot Password?"}
+                  </button>
+                </div>
+              )}
             </div>
 
             {mode === "signup" && (
