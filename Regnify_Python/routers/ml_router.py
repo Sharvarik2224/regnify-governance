@@ -38,7 +38,7 @@ def predict(employee: EmployeeData):
     else:
         shap_vals = shap_values[0, :, 1]
 
-    factors, sentences = xai_service.explain(
+    factors, explainability = xai_service.explain(
         shap_vals,
         list(df.columns)
     )
@@ -48,8 +48,7 @@ def predict(employee: EmployeeData):
         "risk_score": risk_score,
         "risk_level": level,
         "top_risk_factors": factors,
-        "explanation_sentences": sentences
-
+        "explainability": explainability
     }
 
 
