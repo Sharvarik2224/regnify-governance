@@ -3,10 +3,9 @@ import re
 
 class ManagerGovernanceEngine:
 
-
-    # ------------------------------
+    # --------------------------------------------------
     # Conflict Detection
-    # ------------------------------
+    # --------------------------------------------------
 
     def detect_conflict(self, ai_risk, manager_decision):
 
@@ -19,120 +18,275 @@ class ManagerGovernanceEngine:
         return False
 
 
-    # ------------------------------
-    # Justification Validation
-    # ------------------------------
+    # --------------------------------------------------
+    # JUSTIFICATION STRENGTH EVALUATION
+    # --------------------------------------------------
 
-    def validate_justification(self, text):
+    def evaluate_justification_strength(self, text, attachments, ai_risk):
+
+        text = text.lower()
 
         score = 0
+        score_breakdown = {}
 
-        words = text.split()
+        words = re.findall(r'\w+', text)
+        total_words = max(len(words), 1)
 
-        # Rule 1: minimum detail
-        if len(words) >= 20:
-            score += 0.4
+        # --------------------------------------------------
+        # 1 DETAIL DEPTH
+        # --------------------------------------------------
 
-        # Rule 2: performance context keywords
+        if total_words >= 30:
+            detail_score = 0.25
+        elif total_words >= 15:
+            detail_score = 0.15
+        else:
+            detail_score = 0.05
+
+        score += detail_score
+        score_breakdown["detail_depth"] = round(detail_score, 2)
+
+        # --------------------------------------------------
+        # 2 PERFORMANCE CONTEXT DENSITY
+        # --------------------------------------------------
+
         performance_keywords = [
             "project", "performance", "delivery",
-            "client", "improvement", "training",
-            "task", "learning"
+            "client", "training", "improvement",
+            "task", "learning", "deadline"
         ]
 
-        if any(word in text.lower() for word in performance_keywords):
-            score += 0.3
+        context_hits = sum(
+            words.count(keyword) for keyword in performance_keywords
+        )
 
-        # Rule 3: AI factor reference
-        ai_factors = [
-            "attendance", "delay", "escalation",
-            "warning", "task"
+        density = context_hits / total_words
+
+        if density > 0.12:
+            context_score = 0.25
+        elif density > 0.07:
+            context_score = 0.18
+        elif density > 0.03:
+            context_score = 0.10
+        else:
+            context_score = 0.05
+
+        score += context_score
+        score_breakdown["performance_context_density"] = round(context_score, 2)
+
+        # --------------------------------------------------
+        # 3 AI AWARENESS DENSITY
+        # --------------------------------------------------
+
+        ai_keywords = [
+            "attendance",
+            "delay",
+            "escalation",
+            "warning",
+            "task",
+            "risk",
+            "model",
+            "prediction"
         ]
 
-        if any(word in text.lower() for word in ai_factors):
-            score += 0.3
+        ai_hits = sum(
+            words.count(keyword) for keyword in ai_keywords
+        )
 
-        valid = score >= 0.6
+        ai_density = ai_hits / total_words
 
-        return valid, round(score, 2)
+        if ai_density > 0.10:
+            ai_score = 0.25
+        elif ai_density > 0.05:
+            ai_score = 0.18
+        elif ai_density > 0.02:
+            ai_score = 0.10
+        else:
+            ai_score = 0.05
+
+        score += ai_score
+        score_breakdown["ai_awareness_density"] = round(ai_score, 2)
+
+        # --------------------------------------------------
+        # 4 EVIDENCE CREDIBILITY
+        # --------------------------------------------------
+
+        evidence_score = 0
+
+        if attachments:
+
+            evidence_type_score = 0
+            content_match_score = 0
+
+            for file in attachments:
+
+                file_lower = file.lower()
+
+                # Evidence Type Score
+                if "github.com" in file_lower or "gitlab.com" in file_lower:
+                    evidence_type_score += 0.25
+
+                elif "dashboard" in file_lower or "deploy" in file_lower:
+                    evidence_type_score += 0.22
+
+                elif file_lower.endswith(".pdf"):
+                    evidence_type_score += 0.20
+
+                elif file_lower.endswith(".png") or file_lower.endswith(".jpg"):
+                    evidence_type_score += 0.10
+
+                else:
+                    evidence_type_score += 0.08
+
+                # Evidence content alignment
+                for keyword in performance_keywords + ai_keywords:
+                    if keyword in file_lower:
+                        content_match_score += 0.05
+
+            evidence_score = min(
+                evidence_type_score + content_match_score,
+                0.25
+            )
+
+        score += evidence_score
+        score_breakdown["evidence_credibility"] = round(evidence_score, 2)
+
+        # --------------------------------------------------
+        # OVERRIDE RISK MULTIPLIER
+        # --------------------------------------------------
+
+        if ai_risk == "HIGH":
+            multiplier = 1.25
+        elif ai_risk == "MEDIUM":
+            multiplier = 1.10
+        else:
+            multiplier = 1.0
+
+        adjusted_score = min(score * multiplier, 1)
+
+        score_breakdown["risk_multiplier"] = multiplier
+
+        # --------------------------------------------------
+        # CLASSIFICATION
+        # --------------------------------------------------
+
+        if adjusted_score >= 0.7:
+            strength = "STRONG"
+        elif adjusted_score >= 0.4:
+            strength = "MODERATE"
+        else:
+            strength = "WEAK"
+
+        return round(adjusted_score, 2), strength, score_breakdown
 
 
-    # ------------------------------
-    # Attachment Validation
-    # ------------------------------
-
-    def validate_evidence(self, attachments):
-
-        if attachments and len(attachments) > 0:
-            return True
-
-        return False
-
-
-    # ------------------------------
-    # Final Governance Object
-    # ------------------------------
+    # --------------------------------------------------
+    # GOVERNANCE RESULT BUILDER
+    # --------------------------------------------------
 
     def build_governance_result(
+
         self,
         ai_risk,
         manager_decision,
         conflict,
-        justification_valid,
+        score,
+        strength,
         evidence_provided,
-        score
+        score_breakdown
+
     ):
 
         if not conflict:
 
             return {
+
                 "ai_risk_level": ai_risk,
                 "manager_decision": manager_decision,
+
                 "conflict_detected": False,
+
                 "justification_required": False,
-                "justification_valid": True,
+                "justification_strength": "NOT_REQUIRED",
+
                 "evidence_provided": False,
+
                 "validation_score": 1.0,
+
+                "score_breakdown": {},
+
                 "governance_status": "ALIGNED",
+
                 "next_step": "HR_REVIEW"
+
             }
 
-        if not justification_valid:
+        if strength == "WEAK":
 
             return {
+
                 "ai_risk_level": ai_risk,
                 "manager_decision": manager_decision,
+
                 "conflict_detected": True,
+
                 "justification_required": True,
-                "justification_valid": False,
+                "justification_strength": strength,
+
                 "evidence_provided": evidence_provided,
+
                 "validation_score": score,
-                "governance_status": "CONFLICT_INVALID",
+
+                "score_breakdown": score_breakdown,
+
+                "governance_status": "CONFLICT_WEAK_JUSTIFICATION",
+
                 "next_step": "HOLD"
+
             }
 
         if not evidence_provided:
 
             return {
+
                 "ai_risk_level": ai_risk,
                 "manager_decision": manager_decision,
+
                 "conflict_detected": True,
+
                 "justification_required": True,
-                "justification_valid": True,
+                "justification_strength": strength,
+
                 "evidence_provided": False,
+
                 "validation_score": score,
-                "governance_status": "CONFLICT_PENDING_EVIDENCE",
+
+                "score_breakdown": score_breakdown,
+
+                "governance_status": "PENDING_EVIDENCE",
+
                 "next_step": "HOLD"
+
             }
 
         return {
+
             "ai_risk_level": ai_risk,
             "manager_decision": manager_decision,
+
             "conflict_detected": True,
+
             "justification_required": True,
-            "justification_valid": True,
+            "justification_strength": strength,
+
             "evidence_provided": True,
+
             "validation_score": score,
+
+            "score_breakdown": score_breakdown,
+
             "governance_status": "CONFLICT_RESOLVED",
+
             "next_step": "HR_REVIEW"
+
         }

@@ -5,6 +5,8 @@ from routers import governance_router
 from routers import hr_router
 from routers import sitehead_router
 from routers import orchestrator_router
+from routers import succession_router
+
 
 
 app = FastAPI(
@@ -47,4 +49,10 @@ app.include_router(
     orchestrator_router.router,
     prefix="/governance",
     tags=["Governance Orchestrator"]
+)
+
+app.include_router(
+    succession_router.router,
+    prefix="/ai",
+    tags=["Succession Intelligence"]
 )
